@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.florian.sensei</string>
+
+  <!--
+    Run through a login shell so `claude` resolves via the user's normal PATH
+    (native installer, npm global, or homebrew) exactly as in an interactive
+    terminal, rather than guessing a hardcoded binary path here.
+    --allowedTools pre-approves the tools sensei/nightly needs (run the miner,
+    read decisions + target config files, write today's proposal report) so the
+    headless run never blocks on a permission prompt it can't answer.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>echo "/sensei nightly" | claude -p --model sonnet --allowedTools 'Bash(python3 /Users/florianriquelme/Repos/mine/claudesetup/sensei/mine.py:*),Bash(osascript:*),Read,Write(//Users/florianriquelme/.claude/sensei/**)'</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/florianriquelme</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/florianriquelme/.claude/sensei/logs/nightly.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/florianriquelme/.claude/sensei/logs/nightly.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
