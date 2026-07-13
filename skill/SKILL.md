@@ -14,8 +14,8 @@ disable-model-invocation: true
 
 # sensei
 
-Miner lives at `/Users/florianriquelme/Repos/mine/claudesetup/sensei/mine.py` (repo-resident,
-stdlib-only Python — reads `~/.claude/projects/**/*.jsonl`, writes
+Miner lives at `~/.claude/skills/sensei/mine.py` (installed alongside this skill by
+`install.sh`, stdlib-only Python — reads `~/.claude/projects/**/*.jsonl`, writes
 `~/.claude/sensei/events.json`). This skill has two modes, chosen by the argument
 ("nightly" or "review"). If no argument was given, ask which mode.
 
@@ -30,10 +30,10 @@ State lives under `~/.claude/sensei/`:
 Headless. Run by launchd at 05:30. **Never edit CLAUDE.md, skills, or any other config file
 in this mode — proposals only.** That rule is absolute even if a fix looks trivial or obvious.
 
-1. Run the miner for the last day:
-   ```
-   python3 /Users/florianriquelme/Repos/mine/claudesetup/sensei/mine.py --days 1
-   ```
+1. Mining has already run. The launchd job runs the miner in its own shell immediately
+   before invoking this skill, so `~/.claude/sensei/events.json` is already current — this
+   mode only reads it (step 3), never runs the miner. (Running `/sensei nightly` by hand to
+   test? Refresh events first: `python3 ~/.claude/skills/sensei/mine.py --days 1`.)
 2. Read `~/.claude/sensei/decisions.jsonl` if it exists — this is sensei's memory of past
    verdicts. Each line carries a stable proposal `key` (see step 4), a `verdict`, and a `date`.
    Use it to decide what may be re-proposed:

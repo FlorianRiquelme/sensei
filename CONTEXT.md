@@ -35,7 +35,7 @@ _Avoid_: suggestion, fix, recommendation
 A cluster of events sharing one root cause. Only a *qualifying* pattern (≥2 independent sessions, or one high-severity event) becomes a proposal.
 
 **Nightly**:
-The headless mode, run by launchd — mines and writes proposals. Never edits config.
+The headless skill mode, run by launchd — reads mined events, clusters them, and writes proposals. Never edits config. (The miner runs in the launchd shell just before, so nightly itself only reads `events.json`.)
 
 **Review**:
 The interactive morning mode — walks proposals one at a time and applies the ones you accept.

@@ -1,6 +1,8 @@
 # Headless run uses a scoped `--allowedTools` allowlist, never `--dangerously-skip-permissions`
 
-The launchd job runs `claude -p` with a tight `--allowedTools` allowlist: the miner invocation, `osascript`, `Read`, and `Write` scoped to `~/.claude/sensei/**`. The obvious lazy path for automation — `--dangerously-skip-permissions` — is rejected.
+The launchd job runs `claude -p` with a tight `--allowedTools` allowlist: `osascript`, `Read`, and `Write` scoped to `~/.claude/sensei/**`. The obvious lazy path for automation — `--dangerously-skip-permissions` — is rejected.
+
+The miner is deliberately **not** in the allowlist: the launchd job runs it in plain zsh, before Claude, so Claude only ever reads `events.json` and never invokes the miner (see ADR-0001 and ADR-0009). This also removes the one place where a `~`-vs-absolute path mismatch between the skill and the allowlist could have hung the headless run on an unanswerable prompt.
 
 ## Why — hard enforcement of the nightly boundary
 

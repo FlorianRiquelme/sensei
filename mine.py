@@ -15,6 +15,14 @@ PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 MAX_PER_SESSION = 15
 MAX_TOTAL = 400
 
+# --- Correction lexicon -------------------------------------------------------
+# Push-back words that flag a user message as a `correction`. Ships English + German.
+# THIS IS THE ONE PLACE TO EDIT FOR YOUR LANGUAGE: add your language's negations and
+# "no, do X instead" phrases as alternatives below. It only affects `correction` recall
+# — `interrupt` and `denial` detection are language-independent (they match Claude Code's
+# own English status strings), so sensei still works with an unedited lexicon. Over-capture
+# is fine; the analyzer filters semantically (ADR-0004).
+# ------------------------------------------------------------------------------
 CORRECTION_RE = re.compile(
     r"\b(no+pe?|don'?t|stop|wrong|not (what|like) (i|that)|actually|instead|"
     r"i said|i meant|why did you|you should have|never|always use|"

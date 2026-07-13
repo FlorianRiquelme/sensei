@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>sh.sensei</string>
+
+  <!--
+    Template: install.sh resolves __HOME__ to the installing user's $HOME and
+    writes the result to ~/Library/LaunchAgents/sh.sensei.plist. The repo ships
+    no absolute paths.
+
+    Run through a login shell so `claude` resolves via the user's normal PATH
+    (native installer, npm global, or homebrew) exactly as in an interactive
+    terminal, rather than guessing a hardcoded binary path here.
+
+    The miner runs here in plain zsh — deterministic, zero-token — BEFORE claude,
+    so claude only ever reads events.json and never invokes the miner itself
+    (ADR-0001, ADR-0009). `&&` aborts the run if mining fails, so no proposals are
+    drafted off stale events; the failure lands in nightly.log.
+
+    --allowedTools pre-approves only what nightly needs after mining: the osascript
+    notification, reading target config files, and writing today's report. The
+    miner is intentionally absent from the allowlist (ADR-0005).
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>python3 __HOME__/.claude/skills/sensei/mine.py --days 1 &amp;&amp; echo "/sensei nightly" | claude -p --model sonnet --allowedTools 'Bash(osascript:*),Read,Write(__HOME__/.claude/sensei/**)'</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.claude/sensei/logs/nightly.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.claude/sensei/logs/nightly.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
