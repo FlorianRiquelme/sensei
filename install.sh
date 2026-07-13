@@ -1,24 +1,26 @@
 #!/bin/bash
-# sensei installer — idempotent. Copies the skill, creates state dirs, loads the launchd job.
-# Repo (mine.py, this script) stays put; only the skill + plist get installed elsewhere.
+# sensei installer — idempotent. Copies the skill + miner, creates state dirs, loads the launchd job.
+# Ships no absolute paths: the miner is copied out of the repo (so the clone is disposable after
+# install), and the plist template's __HOME__ placeholder is resolved to the installing user's $HOME.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$HOME/.claude/skills/sensei"
 SENSEI_DIR="$HOME/.claude/sensei"
-PLIST_NAME="com.florian.sensei.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/$PLIST_NAME"
-LABEL="com.florian.sensei"
+LABEL="sh.sensei"
+PLIST_TEMPLATE="$REPO_DIR/sh.sensei.plist.template"
+PLIST_DST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-echo "sensei: installing skill -> $SKILLS_DIR"
+echo "sensei: installing skill + miner -> $SKILLS_DIR"
 mkdir -p "$SKILLS_DIR"
 cp "$REPO_DIR/skill/SKILL.md" "$SKILLS_DIR/SKILL.md"
+cp "$REPO_DIR/mine.py" "$SKILLS_DIR/mine.py"
 
 echo "sensei: ensuring state dirs -> $SENSEI_DIR/{proposals,logs}"
 mkdir -p "$SENSEI_DIR/proposals" "$SENSEI_DIR/logs"
 
 echo "sensei: installing launchd job -> $PLIST_DST"
-cp "$REPO_DIR/$PLIST_NAME" "$PLIST_DST"
+sed "s|__HOME__|$HOME|g" "$PLIST_TEMPLATE" > "$PLIST_DST"
 
 if launchctl list | grep -q "$LABEL"; then
   echo "sensei: unloading existing job before reload"

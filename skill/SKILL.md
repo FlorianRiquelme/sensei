@@ -14,8 +14,8 @@ disable-model-invocation: true
 
 # sensei
 
-Miner lives at `/Users/florianriquelme/Repos/mine/claudesetup/sensei/mine.py` (repo-resident,
-stdlib-only Python — reads `~/.claude/projects/**/*.jsonl`, writes
+Miner lives at `~/.claude/skills/sensei/mine.py` (installed alongside this skill by
+`install.sh`, stdlib-only Python — reads `~/.claude/projects/**/*.jsonl`, writes
 `~/.claude/sensei/events.json`). This skill has two modes, chosen by the argument
 ("nightly" or "review"). If no argument was given, ask which mode.
 
@@ -30,24 +30,41 @@ State lives under `~/.claude/sensei/`:
 Headless. Run by launchd at 05:30. **Never edit CLAUDE.md, skills, or any other config file
 in this mode — proposals only.** That rule is absolute even if a fix looks trivial or obvious.
 
-1. Run the miner for the last day:
-   ```
-   python3 /Users/florianriquelme/Repos/mine/claudesetup/sensei/mine.py --days 1
-   ```
-2. Read `~/.claude/sensei/decisions.jsonl` if it exists. Build the set of previously-decided
-   proposal titles. Never re-propose a title that was already rejected.
+1. Mining has already run. The launchd job runs the miner in its own shell immediately
+   before invoking this skill, so `~/.claude/sensei/events.json` is already current — this
+   mode only reads it (step 3), never runs the miner. (Running `/sensei nightly` by hand to
+   test? Refresh events first: `python3 ~/.claude/skills/sensei/mine.py --days 1`.)
+2. Read `~/.claude/sensei/decisions.jsonl` if it exists — this is sensei's memory of past
+   verdicts. Each line carries a stable proposal `key` (see step 4), a `verdict`, and a `date`.
+   Use it to decide what may be re-proposed:
+   - **accepted** decisions never expire — the rule is already in the target file, so step 4's
+     "read the target and don't duplicate an existing rule" is what keeps it from recurring.
+   - **rejected** decisions impose a **30-day cooldown**, not permanent suppression. A pattern
+     matching a rejected decision is suppressed until 30 days after that decision's `date` (use
+     the most recent rejection if the same key was rejected more than once). Once the window has
+     elapsed the pattern is re-eligible — and will only actually resurface if it recurs in fresh
+     events, which the daily mine surfaces naturally.
+
+   Match a candidate pattern against prior decisions **semantically**, using each decision's
+   `key` as a strong hint — do not gate on title string-equality (titles are free text and drift
+   between runs). Legacy decision lines written before keys existed carry only a `title`; fall
+   back to a semantic title match for those.
 3. Read `~/.claude/sensei/events.json`. Cluster the events semantically into recurring
    friction patterns (same root cause, not just same event type). A pattern qualifies for a
    proposal only if:
    - it appears in **≥2 independent sessions** (different `session` values), OR
    - it is a **single high-severity event** — e.g. a destructive action the user had to
      interrupt or explicitly deny.
-   Discard everything else. Skip any pattern whose title duplicates a decision already in
-   `decisions.jsonl`.
+   Discard everything else, and drop any pattern currently suppressed by a decision (step 2).
 4. For each qualifying pattern, before writing anything, **read the current target file**
    (`~/.claude/CLAUDE.md`, the relevant skill's `SKILL.md`, or a per-project `CLAUDE.md`) so
    the proposal fits its existing structure and doesn't duplicate an existing rule. Then draft:
    - **Title** — short, specific.
+   - **Key** — a stable identity for this proposal, independent of the title's wording:
+     `<target-file>::<normalized-rule-slug>`, where the slug is a short lowercase, hyphenated
+     signature of the rule's *intent* (e.g. `~/.claude/CLAUDE.md::ddev-prefix-artisan`). Two
+     proposals that would edit the same rule must produce the same key even if their titles
+     differ. This is what step 2 matches against and what review records in `decisions.jsonl`.
    - **Evidence** — 2–3 verbatim quotes from `user_text` / `assistant_context`, each tagged
      with its `project`.
    - **Root cause** — one sentence.
@@ -64,9 +81,9 @@ in this mode — proposals only.** That rule is absolute even if a fix looks tri
 Interactive, run by the human in the morning.
 
 1. Find the newest file under `~/.claude/sensei/proposals/`. Check `decisions.jsonl` for
-   titles from that file already decided — if every proposal in the newest file is already
-   decided, fall back to the next-newest file with undecided proposals. If none, say so and
-   stop.
+   proposals from that file already decided (match by `key`) — if every proposal in the newest
+   file is already decided, fall back to the next-newest file with undecided proposals. If none,
+   say so and stop.
 2. Walk proposals **one at a time**, in plain text (no dialog tool needed — this is a
    conversation):
    - Show the title, evidence quotes, root cause, target file, and exact text to add/change.
@@ -77,6 +94,8 @@ Interactive, run by the human in the morning.
    (accepted, rejected, or edited-then-accepted), append one line to
    `~/.claude/sensei/decisions.jsonl`:
    ```json
-   {"date": "YYYY-MM-DD", "title": "...", "verdict": "accepted|rejected", "target": "..."}
+   {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted|rejected", "target": "..."}
    ```
+   Copy the `key` verbatim from the proposal — the cooldown and dedup in nightly step 2 depend
+   on it being stable across runs.
 4. When all proposals in the file are decided, tell the user how many were accepted/rejected.
