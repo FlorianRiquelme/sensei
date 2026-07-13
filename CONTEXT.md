@@ -41,5 +41,13 @@ The headless mode, run by launchd — mines and writes proposals. Never edits co
 The interactive morning mode — walks proposals one at a time and applies the ones you accept.
 
 **Decision**:
-An append-only record of a past verdict on a proposal (`accepted` | `rejected`) in `decisions.jsonl`. sensei's memory: a rejected proposal is never re-proposed.
+An append-only record of a past verdict on a proposal (`accepted` | `rejected`) in `decisions.jsonl`, carrying the proposal's Proposal key. sensei's memory: an accepted proposal is already applied; a rejected one is suppressed for a Cooldown, not forever.
 _Avoid_: verdict (except as the field name), outcome
+
+**Cooldown**:
+The finite window (default 30 days) a rejected Proposal stays suppressed before its pattern becomes eligible again. sensei's rejection memory is a cooldown, not permanent silence.
+_Avoid_: permanent suppression, ban, blacklist
+
+**Proposal key**:
+A Proposal's stable identity — target file plus a normalized rule signature — independent of its LLM-generated title. The thing a Decision is matched on, so re-worded duplicates of the same rule collapse to one identity.
+_Avoid_: title (as a dedup key)

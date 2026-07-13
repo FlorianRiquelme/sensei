@@ -50,13 +50,16 @@ One skill, two modes via args:
 
 **`/sensei nightly`** (run headless by launchd):
 1. Run the miner for `--days 1`.
-2. Read `~/.claude/sensei/decisions.jsonl` (past accepted/rejected proposal titles) — never
-   re-propose something previously rejected.
+2. Read `~/.claude/sensei/decisions.jsonl` (past verdicts, each with a stable proposal `key`).
+   Rejected proposals are suppressed on a **30-day cooldown**, not permanently — after the
+   window they resurface if the evidence recurs; accepted ones are already applied. Match
+   candidates against decisions semantically via the `key`, not by title string.
 3. Analyze events: cluster semantically; a pattern qualifies only with ≥2 independent
    occurrences (different sessions) OR one clearly high-severity event (e.g. a destructive
    action the user had to interrupt).
-4. For each qualifying pattern write a proposal: title, 2–3 evidence quotes (with project
-   name), root cause in one sentence, target file (`~/.claude/CLAUDE.md` section, a skill's
+4. For each qualifying pattern write a proposal: title, a stable dedup `key` (target file +
+   normalized rule signature, independent of the free-text title), 2–3 evidence quotes (with
+   project name), root cause in one sentence, target file (`~/.claude/CLAUDE.md` section, a skill's
    SKILL.md, or a per-project CLAUDE.md path), and the EXACT text to add/change, ready to
    paste. Read the current target file first so the proposal fits its existing structure and
    doesn't duplicate an existing rule.
@@ -70,7 +73,7 @@ One skill, two modes via args:
 2. Walk proposals one at a time in plain text: show evidence + exact diff, ask
    accept/reject/edit.
 3. Apply accepted edits to their target files; append every verdict to
-   `~/.claude/sensei/decisions.jsonl` as `{"date", "title", "verdict", "target"}`.
+   `~/.claude/sensei/decisions.jsonl` as `{"date", "title", "key", "verdict", "target"}`.
 
 ### 3. Scheduler — launchd
 
@@ -84,7 +87,8 @@ and loads the plist (idempotent). Do NOT run install.sh yourself — the human d
 
 ## Guardrails
 - Proposals only at night; edits only in interactive review.
-- Rejected proposals stay rejected (decisions.jsonl is the memory).
+- Rejected proposals are suppressed for a 30-day cooldown, then may resurface if the evidence
+  recurs (decisions.jsonl is the memory; dedup is keyed on a stable proposal key, not the title).
 - Miner reads transcripts, writes only under `~/.claude/sensei/`.
 - Keep everything boring and stdlib — no deps, no venv.
 
