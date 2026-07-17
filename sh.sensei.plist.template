@@ -28,7 +28,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>python3 __HOME__/.claude/skills/sensei/mine.py --days 1 &amp;&amp; echo "/sensei nightly" | claude -p --model sonnet --allowedTools 'Bash(osascript:*),Read,Write(__HOME__/.claude/sensei/**)'</string>
+    <string>python3 __HOME__/.claude/skills/sensei/mine.py --days 1 &amp;&amp; echo "/sensei nightly" | claude -p --model sonnet --allowedTools 'Bash(osascript:*),Read,Edit(__HOME__/.claude/sensei/**)'</string>
   </array>
 
   <key>WorkingDirectory</key>
