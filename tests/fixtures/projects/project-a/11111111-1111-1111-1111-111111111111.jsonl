@@ -1,0 +1,6 @@
+{"type": "assistant", "timestamp": "2020-01-01T00:00:00Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "I'll update the config file."}]}}
+{"type": "user", "timestamp": "2020-01-01T00:00:01Z", "message": {"role": "user", "content": "No, don't do that, use the helper instead."}}
+{"type": "user", "isSidechain": true, "timestamp": "2020-01-01T00:00:02Z", "message": {"role": "user", "content": "No, stop, that's wrong."}}
+{"type": "user", "isMeta": true, "timestamp": "2020-01-01T00:00:03Z", "message": {"role": "user", "content": "No, stop, that's wrong."}}
+{"type": "user", "timestamp": "2020-01-01T00:00:04Z", "message": {"role": "user", "content": "<system-reminder>no stop wrong</system-reminder>"}}
+{"type": "user", "timestamp": "2020-01-01T00:00:05Z", "message": {"role": "user", "content": "Thanks, that looks great."}}

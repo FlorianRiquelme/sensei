@@ -140,6 +140,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=1, help="window in days; 0 = all time")
     ap.add_argument("--out", default=os.path.expanduser("~/.claude/sensei/events.json"))
+    ap.add_argument("--projects-dir", default=PROJECTS_DIR, help="dir to scan (default ~/.claude/projects)")
     args = ap.parse_args()
 
     cutoff = None
@@ -148,7 +149,7 @@ def main():
 
     # main sessions only: <project>/<uuid>.jsonl — this glob already excludes
     # anything nested under <project>/<uuid>/subagents/*.jsonl
-    files = sorted(glob.glob(os.path.join(PROJECTS_DIR, "*", "*.jsonl")))
+    files = sorted(glob.glob(os.path.join(args.projects_dir, "*", "*.jsonl")))
 
     all_events = []
     sessions_scanned = 0
