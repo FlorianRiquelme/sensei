@@ -1,5 +1,5 @@
 ---
-status: proposed — from ideas triage (issue #12)
+status: accepted — implemented (issue #12)
 ---
 
 # Rejection carries a structured verdict and a probed reason — extends ADR-0003

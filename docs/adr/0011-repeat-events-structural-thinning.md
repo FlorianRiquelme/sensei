@@ -1,5 +1,5 @@
 ---
-status: proposed — from ideas triage (issue #9)
+status: accepted — implemented (issue #9)
 ---
 
 # `repeat` events use structural thinning — a bounded exception to ADR-0004

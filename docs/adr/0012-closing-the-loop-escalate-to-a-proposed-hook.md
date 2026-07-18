@@ -1,5 +1,5 @@
 ---
-status: proposed — from ideas triage (issues #10, #11)
+status: accepted — implemented (issues #10, #11)
 ---
 
 # Closing the loop: escalate a non-sticking rule to a *proposed* hook

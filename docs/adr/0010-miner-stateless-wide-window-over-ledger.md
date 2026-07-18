@@ -1,5 +1,5 @@
 ---
-status: proposed — from ideas triage (issues #8, #9)
+status: accepted — implemented (issues #8, #9)
 ---
 
 # The miner stays stateless: a wide re-read window, not a persistent ledger
