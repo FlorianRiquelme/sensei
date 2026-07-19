@@ -20,8 +20,7 @@
 - Nightly mode proposes only; it never edits CLAUDE.md, skills, or any config (ADR-0002, enforced
   by the headless allowlist per ADR-0005). Only interactive review applies changes.
 - Python is stdlib-only — no dependencies, no venv, ever (ADR-0008).
-- macOS-only by design (launchd + osascript) — don't add Linux/Windows portability shims
-  (ADR-0007).
+- macOS-only by design (launchd) — don't add Linux/Windows portability shims (ADR-0007).
 - Miner favors recall; precision is the LLM's job — don't "fix" over-capture in the regex
   (ADR-0004).
 

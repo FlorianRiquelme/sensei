@@ -18,17 +18,21 @@
     The miner runs here in plain zsh — deterministic, zero-token — BEFORE claude,
     so claude only ever reads events.json and never invokes the miner itself
     (ADR-0001, ADR-0009). `&&` aborts the run if mining fails, so no proposals are
-    drafted off stale events; the failure lands in nightly.log.
+    drafted off stale events; the failure lands in nightly.log — and the miner's
+    Digest (written before this claude invocation, ADR-0014) is what the session
+    Nudge checks for to detect that failure the next morning.
 
-    --allowedTools pre-approves only what nightly needs after mining: the osascript
-    notification, reading target config files, and writing today's report. The
-    miner is intentionally absent from the allowlist (ADR-0005).
+    --allowedTools pre-approves only what nightly needs after mining: reading
+    target config files and writing today's report (ADR-0005). SENSEI_NIGHTLY=1
+    is set on the claude invocation, not on mine.py, so its own SessionStart hook
+    exits immediately instead of consuming the user's real first session of the
+    day (ADR-0015).
   -->
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>python3 __HOME__/.claude/skills/sensei/mine.py --days 1 &amp;&amp; echo "/sensei nightly" | claude -p --model sonnet --allowedTools 'Bash(osascript:*),Read,Edit(__HOME__/.claude/sensei/**)'</string>
+    <string>python3 __HOME__/.claude/skills/sensei/mine.py --days 1 &amp;&amp; echo "/sensei nightly" | SENSEI_NIGHTLY=1 claude -p --model sonnet --allowedTools 'Read,Edit(__HOME__/.claude/sensei/**)'</string>
   </array>
 
   <key>WorkingDirectory</key>

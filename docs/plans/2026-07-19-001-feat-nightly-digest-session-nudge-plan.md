@@ -4,7 +4,7 @@ type: feat
 date: 2026-07-19
 topic: nightly-digest-session-nudge
 artifact_contract: ce-unified-plan/v1
-artifact_readiness: requirements-only
+artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
 ---
@@ -161,3 +161,239 @@ Resolved in a full grilling pass; this is the implementation contract. Load-bear
 ### Tests
 
 - Unit tests for `nudge.py` (date boundary, latching, env guard, pending count + degradation, line formats), `mine.py` digest (contents, R3 durability), and `settings_hook.py` (add/remove edge cases). Bash orchestration scripts not unit-tested.
+
+---
+
+## Planning Contract (ce-plan, 2026-07-19)
+
+**Product Contract preservation:** unchanged. The Design Resolutions above (D1–D14, D10a) are locked; this section only sequences them into build order. Every unit traces to a D-item; no product decision is reopened.
+
+### Build order & dependencies
+
+Three phases. Phase A units are mutually independent and can land in any order (or in parallel). Phase B consumes Phase A. Phase C wires the installed surface last, once the artifacts it copies and registers exist.
+
+```mermaid
+flowchart LR
+  subgraph A["Phase A — foundational (independent)"]
+    U1[U1 · mine.py Digest]
+    U2[U2 · settings_hook.py]
+    U4[U4 · SKILL.md contract]
+  end
+  subgraph B["Phase B — nudge"]
+    U3[U3 · nudge.py]
+  end
+  subgraph C["Phase C — install surface"]
+    U5[U5 · plist template]
+    U6[U6 · install.sh]
+    U7[U7 · uninstall.sh]
+  end
+  U1 -->|digest shape| U3
+  U4 -->|verbatim Key line| U3
+  U4 -.osascript removal pairs.-> U5
+  U1 -->|install-time seed| U6
+  U2 -->|add/remove| U6
+  U3 -->|file to copy| U6
+  U2 -->|remove| U7
+  U6 -.mirror surface.-> U7
+```
+
+| Unit | Title | D-items | R-items | Depends on |
+|------|-------|---------|---------|------------|
+| U1 | Miner writes per-day Digest | D1, D2, D3 | R1, R2, R3, R8 | — |
+| U2 | `settings_hook.py` add/remove | D13 | — | — |
+| U3 | `nudge.py` SessionStart logic | D4, D5, D6, D7, D8, D9, D10, D10a | R4, R5, R6, R7, R8 | U1, U4 |
+| U4 | SKILL.md contract changes | D10, D11, D12 | R9, R10 | — |
+| U5 | plist template | D8, D12 | R9 | U4 (logical) |
+| U6 | install.sh registers hook | D13 | R4 | U1, U2, U3 |
+| U7 | uninstall.sh (new) | D14 | — | U2, U6 (logical) |
+
+**Two cross-unit format contracts** — get these verbatim or tests pass green while production mis-parses:
+
+1. **Key line (U4 → U3).** U4 pins the *literal* proposal `Key` line string; U3's pending parser and its test fixtures must reproduce that exact string. A drift is silent: U3 tests using their own fixture string stay green while real proposal files fail to parse.
+2. **Local-date filename / boundary (U1 ↔ U3).** U1's digest filename and U3's `expected_date` each derive from **local** time independently; `generated_at` stays UTC and must never feed date logic. The seam is the off-by-one "did not run" false alarm near midnight (see Risks).
+
+---
+
+## Implementation Units
+
+### U1. Miner writes per-day Digest
+
+- **Goal:** `mine.py` writes a dated Digest JSON alongside `events.json` in the same scan, so the Digest's presence proves the patrol ran and its absence is the failure signal.
+- **Requirements:** R1, R2, R3, R8; D1, D2, D3. ADR-0014.
+- **Dependencies:** none.
+- **Files:** `mine.py`, `tests/test_mine.py` (extend), `install.sh` (mkdir — see U6; the dir is also created defensively here).
+- **Approach:**
+  - After the existing `events.json` write in `main()`, compute Digest fields from the already-scanned `all_events` (post-cap): `date` (local `YYYY-MM-DD`), `generated_at` (existing UTC ISO), `sessions_scanned`, `events_total` (`len(all_events)`), `by_type` (count per event `type`), `by_project` (count per event `project`). No proposals field (D1 — the miner cannot know them).
+  - **Digest path derives from `--out`'s parent:** `os.path.join(os.path.dirname(args.out), "digests", f"{local_date}.json")`, with `os.makedirs(..., exist_ok=True)`. This is deliberate and load-bearing for two reasons the implementer must not "fix": (a) the plist runs `mine.py --days 1` with **no `--out`**, so it takes the default live path and Digests land at `~/.claude/sensei/digests/` — **U1 needs no plist change**; (b) tests pass a tmp `--out`, so the Digest side-write lands in the tmp dir and never touches live state. Do **not** add a redundant `--digest-dir` flag.
+  - `date` uses `dt.datetime.now().date()` (local, naive) — **not** the UTC `generated_at`. This is the U1↔U3 local-time contract.
+  - R3 durability is free: per-day filename means a later run the same day overwrites only today's file; other days' files are untouched.
+  - R8: a zero-event scan still writes a Digest (empty `by_type`/`by_project`, `events_total: 0`).
+- **Patterns to follow:** mirror the existing `out = {...}` dict + `os.makedirs` + `json.dump(..., indent=2)` block at `mine.py:167-176`.
+- **Test scenarios** (`tests/test_mine.py`, reusing the `run_mine` helper — extend it to also locate `<tmp>/digests/<date>.json`):
+  - Digest exists after a run and carries all six fields with correct types.
+  - `by_type` / `by_project` counts match the events written to `events.json` and are post-cap (assert against the fixture's known 3-event, 2-project shape).
+  - `events_total` equals `len(events)` in the sibling `events.json`.
+  - Covers R3. Two runs into the same `--out` dir on the same day: the Digest file is present and current; assert the write does not raise and the file parses (durability across same-day reruns).
+  - Covers R8. A projects dir that yields zero events still writes a Digest with `events_total: 0` and empty `by_type`/`by_project`.
+  - `date` is the local calendar date, distinct in source from the UTC `generated_at` (assert `date` matches `datetime.now().date()`, not derived from `generated_at`).
+- **Verification:** `python3 -m unittest discover tests` green; a manual `python3 mine.py --days 1 --out <scratch>/events.json` leaves `<scratch>/digests/<today>.json` with sane counts.
+
+### U2. `settings_hook.py` — register/deregister the SessionStart hook
+
+- **Goal:** a repo-resident, unit-tested stdlib helper that idempotently adds sensei's SessionStart hook to `~/.claude/settings.json` and removes only sensei's entry — **without disturbing foreign hooks** the user already runs.
+- **Requirements:** D13. ADR-0015.
+- **Dependencies:** none.
+- **Files:** `settings_hook.py` (new, repo root — copied to skills dir by U6), `tests/test_settings_hook.py` (new).
+- **Approach:**
+  - CLI: `settings_hook.py add --command <abs-cmd> --settings <path>` and `settings_hook.py remove --settings <path>`. `--settings` defaults to `~/.claude/settings.json`; tests pass a tmp path. `--command` is the fully-resolved `"<abs-python3> <abs-nudge.py>"` string (U6 resolves it at install; U2 does not hardcode paths).
+  - **Marker-based upsert.** Tag sensei's hook object with a stable marker (e.g. a `"_sensei"` key on the hook entry, or match on the `nudge.py` substring in its command). `add` finds an existing sensei entry by marker and replaces it (idempotent — re-running install never duplicates); if absent, appends.
+  - **Preserve foreign hooks — concrete, not hypothetical.** The target `~/.claude/settings.json` on this machine already holds a foreign SessionStart entry (`bash ".../.vibe-ads/ensure-statusline.sh"`, registered with no matcher). `hooks.SessionStart` is an **array of matcher-groups** (each `{ "matcher"?, "hooks": [ { "type": "command", "command": … } ] }`); `add` must append sensei's group into that array and `remove` must delete **only** sensei's marked entry, leaving every other group byte-for-byte intact. This is the sharpest correctness risk in the unit. (Some tools register SessionStart hooks via a plugin mechanism rather than this file — U2 owns only entries that actually live in `settings.json`, so fixtures should use a generic foreign entry, not assume any specific tool's shape.)
+  - **Matcher:** register under a matcher that fires on all SessionStart sources (startup, resume, clear) so the Nudge actually runs — an empty/`"*"` matcher per Claude Code's SessionStart schema (D9: "all SessionStart sources"). The D6/D9 latch dedups same-day repeat fires, so firing broadly is safe; firing narrowly would silence the Nudge.
+  - Robustness: missing `settings.json` → treat as `{}` and create it on `add`; malformed JSON → fail loudly (non-zero exit, clear message) rather than silently clobbering the user's settings. Preserve unrelated top-level keys and key order where practical (`json.load`/`json.dump`, `indent=2`).
+- **Patterns to follow:** stdlib `json` + `argparse`, same shape as `mine.py`'s `main()`; no third-party deps (ADR-0008).
+- **Test scenarios** (`tests/test_settings_hook.py`, all against a tmp settings path):
+  - `add` on a **missing** file creates `settings.json` with sensei's SessionStart hook under an all-sources matcher.
+  - `add` on a file that **already contains a foreign SessionStart hook** (simulate a generic foreign matcher-group, e.g. the real `ensure-statusline.sh` no-matcher entry) appends sensei's entry and leaves the foreign entry byte-for-byte intact.
+  - `add` run **twice** is idempotent — exactly one sensei entry, foreign entries untouched.
+  - `add` preserves **unrelated top-level keys** (e.g. `model`, `permissions`) and other hook events (`Stop`, `PreToolUse`).
+  - `remove` deletes **only** sensei's entry; a co-resident foreign SessionStart hook survives.
+  - `remove` when no sensei entry exists is a no-op (exit 0, file unchanged).
+  - `add`→`remove` round-trip restores the file to its pre-add hook set.
+  - Malformed JSON input → non-zero exit, file not clobbered.
+- **Verification:** unit tests green; the foreign-hook-preservation and idempotency scenarios are the gate.
+
+### U3. `nudge.py` — the SessionStart Nudge
+
+- **Goal:** a lean stdlib hook that prints exactly one sensei line via top-level `systemMessage`, following the D10a state precedence, latching once per day on success and repeating on failure.
+- **Requirements:** R4, R5, R6, R7, R8; D4, D5, D6, D7, D8, D9, D10, D10a. ADR-0015.
+- **Dependencies:** U1 (Digest shape/location), U4 (verbatim `Key` line for pending parse).
+- **Files:** `nudge.py` (new, repo root — copied to skills dir by U6), `tests/test_nudge.py` (new).
+- **Execution note:** **First step, before writing any nudge logic — re-confirm the channel.** Wire a 30-second throwaway SessionStart hook that emits `{"systemMessage":"probe"}` and confirm the line renders in a real Claude Code session. Top-level `systemMessage` is the *only* visible channel; plain stdout and `hookSpecificOutput.systemMessage` are invisible and fail silently (D7, verified 2026-07-19 CC v2.1.215). If this regressed in a newer CC build, the whole feature is dead on arrival — catch it here, not after writing 150 lines.
+- **Approach** — evaluate in this order (D10a precedence):
+  1. **Env guard (D8):** if `SENSEI_NIGHTLY` is set → exit immediately, no output. (The nightly's own `claude -p` fires SessionStart; this stops it consuming the user's real first session.)
+  2. **Expected date (D5):** `expected_date = today if now ≥ 05:30 local else yesterday`, all local. `05:30` is a commented constant mirroring the plist. No grace margin.
+  3. **Failure (R7, D5/D6):** if `digests/<expected_date>.json` is absent → emit the loud "nightly did not run" line as top-level `systemMessage`, **plus** `hookSpecificOutput.additionalContext` pointing Claude at `logs/nightly.log`. Do **not** write the state file (failure repeats every session until it heals). Exit.
+  4. **Latch (D6/D9):** Digest present → if `nudge-state` holds today's local date, exit silently (already nudged today).
+  5. **Pending vs heartbeat (D10a):** compute pending; if `pending > 0` emit the pending line (R6), else the heartbeat (R5/R8). Write `nudge-state = today` (local). Exit.
+  - **Delivery (D7):** build `{"systemMessage": "<line>"}` (failure adds `hookSpecificOutput.additionalContext`) with stdlib `json`, print to stdout. Nothing else on stdout.
+  - **Pending computation (D10):** parse the verbatim `Key` line (U4 contract) from every `proposals/*.md`; pending keys = those not present as a `key` in `decisions.jsonl`. Report exact count + the oldest containing file's date (from the `YYYY-MM-DD.md` filename). On any parse miss, degrade to a countless "proposals waiting since `<date>`" line — err toward a **false "waiting"** (over-remind, never under-remind).
+  - **Leanness (D7):** keep imports and file I/O minimal — the hook blocks the prompt (~30 ms budget). Wrap the body so any unexpected error exits silently rather than disrupting session start.
+- **Patterns to follow:** stdlib `json`/`os`/`datetime` like `mine.py`; read paths under `~/.claude/sensei/` (`digests/`, `proposals/`, `decisions.jsonl`, `nudge-state`), all overridable via an env var or arg so tests point at a tmp dir.
+- **Test scenarios** (`tests/test_nudge.py`, tmp sensei dir, injected "now"):
+  - Covers R4/D8. `SENSEI_NIGHTLY=1` → no output, no state write.
+  - Covers R7/D5. Digest for `expected_date` absent → failure line present in top-level `systemMessage`, `additionalContext` names `logs/nightly.log`, state file **not** written.
+  - Covers R7/D6. Failure repeats: two consecutive invocations both emit the failure line (no latch).
+  - Covers R5/R8. Digest present, zero pending → heartbeat line summarizing sessions/events/0 proposals; state written.
+  - Covers R6. Two undecided proposals in a Tuesday file, today Friday → pending line reports count 2 and oldest = Tuesday, names `/sensei review`.
+  - Pending excludes decided keys: a proposal whose `Key` appears in `decisions.jsonl` is not counted.
+  - **Legacy/degrade (D10):** a proposal file with no parseable `Key` line → degrade to countless "since `<date>`" line, no crash, err toward over-remind.
+  - Covers AE4/D9. Second invocation same local day in the healthy state → silent (latched).
+  - **Local-time boundary (D5):** with a fixed `expected_date` file present, `now` at 05:29 vs 05:31 selects yesterday vs today; a near-local-midnight `now` does not produce a spurious "did not run".
+  - Malformed `decisions.jsonl` / Digest JSON → nudge does not crash the session (silent or degrade).
+- **Verification:** unit tests green; the throwaway-hook channel probe (execution note) confirmed before logic; a manual install shows the heartbeat once and then silence on the second session same day.
+
+### U4. SKILL.md — Key line, Supporting-events, baseline, osascript removal
+
+- **Goal:** make the proposal `Key` line machine-parseable, carry the cluster size onto each proposal and onto accepted decisions, and remove the osascript notification.
+- **Requirements:** R9, R10; D10, D11, D12. ADR-0015.
+- **Dependencies:** none (but U3 consumes the pinned Key-line format — see cross-unit contract).
+- **Files:** `skill/SKILL.md`.
+- **Approach:**
+  - **Pin the Key line (D10):** in nightly step 4, fix the literal output line format so U3 can parse it — e.g. `- **Key:** `<target-file>::<slug>``. Whatever exact string is chosen becomes the U3 parse contract; U3's parser and fixtures must match it verbatim. Keep the existing intent prose but make the *emitted line* deterministic.
+  - **Supporting events (D11):** add a new proposal field, `- **Supporting events:** N`, where N is the qualifying cluster's event count (the size step 3 already computes). Add it to the drafted-proposal field list (step 4) so every proposal carries it. The zero-proposal one-line file (step 5) is unaffected.
+  - **Baseline on accept (D11):** in review step 3, when a proposal is **accepted**, copy its `Supporting events` value into the appended decision as `"baseline": N`. Rejected/edited-then-rejected decisions store no baseline. Update the decision-record JSON example (`skill/SKILL.md:96-98`) to show the additive optional field. This is the additive schema seam (below) — nothing reads it this slice.
+  - **Delete osascript (D12):** remove nightly step 6 (the `osascript` notification) entirely. No replacement.
+- **Patterns to follow:** match the existing `- **Field:**` bullet style in step 4 and the fenced JSON example in review step 3.
+- **Test scenarios:** `Test expectation: none — SKILL.md is a prose/skill contract, not executable code.` Its two machine-facing guarantees are exercised elsewhere: the pinned Key-line format is covered by U3's pending-parse tests (which must use the verbatim string), and the `baseline` field is covered by the schema-seam note. When editing, keep the emitted Key line and the `baseline` field byte-consistent with U3's fixtures.
+- **Verification:** the Key-line string in SKILL.md is identical to the string U3 parses; osascript no longer appears in the skill; review step 3 shows the conditional `baseline` on accept.
+
+### U5. plist template — self-trigger guard, allowlist, comment
+
+- **Goal:** guard the nightly's own `claude` run against the Nudge, drop the now-unused osascript permission, and correct the stale comment.
+- **Requirements:** R9; D8, D12.
+- **Dependencies:** logical pair with U4 (the allowlist drops `Bash(osascript:*)` because U4 removes the osascript step).
+- **Files:** `sh.sensei.plist.template`.
+- **Approach:**
+  - **SENSEI_NIGHTLY on `claude` (D8):** set the env var on the `claude` invocation, not as a prefix on `mine.py`. Either `… && SENSEI_NIGHTLY=1 claude -p …` or `export SENSEI_NIGHTLY=1` before the `&&` chain. **Trap:** `SENSEI_NIGHTLY=1 python3 mine.py … && claude …` scopes the var to `mine.py` only, leaving `claude` and its hook child unguarded — the Nudge would then self-suppress the user's real first session every day. `mine.py` spawns no hooks and does not need the var.
+  - **Shrink the allowlist (D12):** `--allowedTools 'Read,Edit(__HOME__/.claude/sensei/**)'` — remove `Bash(osascript:*)`.
+  - **Fix the stale comment:** the current comment (`sh.sensei.plist.template:9-26`) describes the osascript notification and the old allowlist; update it to reflect the removed notification and the self-trigger guard.
+- **Patterns to follow:** existing `<string>` ProgramArguments line at `sh.sensei.plist.template:31`; keep the `__HOME__` placeholders and the `&&`-abort-on-mine-failure behavior intact.
+- **Test scenarios:** `Test expectation: none — plist template is launchd config, not unit-tested (Design Resolutions).` 
+- **Verification:** the resolved plist (`sed __HOME__`) has `SENSEI_NIGHTLY=1` on `claude`, no `osascript` in the allowlist, and a comment matching current behavior; `plutil -lint` on a resolved copy passes.
+
+### U6. install.sh — copy new scripts, mkdir digests, register the hook
+
+- **Goal:** extend the installer to ship `nudge.py` + `settings_hook.py`, create `digests/`, and register the SessionStart hook with absolute paths resolved at install time.
+- **Requirements:** R4; D13. ADR-0015.
+- **Dependencies:** U1 (the miner the install-time seed invokes), U2 (`settings_hook.py add`), U3 (`nudge.py` to copy).
+- **Files:** `install.sh`.
+- **Execution note:** **before wiring the hook registration, re-run the U3 channel probe** end-to-end from an actually-installed hook (resolved absolute paths, real `settings.json`) to confirm the top-level `systemMessage` renders. The absolute-path requirement is load-bearing (below); confirm the boot path works before declaring the unit done.
+- **Approach:**
+  - Copy `nudge.py` and `settings_hook.py` into `$SKILLS_DIR` alongside `mine.py` (extend the `cp` block at `install.sh:16-17`).
+  - `mkdir -p "$SENSEI_DIR/digests"` (extend the state-dir block at `install.sh:19-20`).
+  - **Seed today's Digest so the Nudge doesn't false-alarm on install day.** After copying files and creating `digests/`, run the miner once synchronously — `python3 "$SKILLS_DIR/mine.py" --days 1` (default live `--out`, so it writes `events.json` + `digests/<today>.json` exactly as the nightly does). Without this, installing on an already-running system leaves `digests/<today>.json` absent until the next 05:30 run, and the latch-exempt failure line (D6) reprints the loud "nightly did not run" every session for ~a day on a night the patrol actually ran — and the scratch-`$HOME` Verification step below ("first session shows the heartbeat") would otherwise be unsatisfiable. Reuses the existing idempotent, zero-token miner — no new bootstrap logic. (Covers the common daytime install; a rare pre-05:30 install seeds the same local date and self-heals at the next 05:30 run.)
+  - **Resolve absolute paths (D13, load-bearing):** resolve an absolute `python3` (e.g. `command -v python3`) and the absolute installed `nudge.py` path, and pass `"<abs-python3> <abs-nudge.py>"` as the command to `python3 settings_hook.py add --command …`. A bare `python3` under a GUI-launched minimal PATH can resolve to the `/usr/bin/python3` CLT stub and **hang boot** — never register a bare `python3`.
+  - Call `settings_hook.py add` (idempotent upsert, U2) so re-running install never duplicates the hook and never disturbs foreign hooks.
+- **Patterns to follow:** the existing idempotent `mkdir -p` / `cp` / `sed` structure and the `echo` progress lines; keep `set -euo pipefail`.
+- **Test scenarios:** `Test expectation: none — bash orchestration, not unit-tested (Design Resolutions). settings_hook.py add is covered by U2.`
+- **Verification:** run `./install.sh` against a scratch `$HOME`; confirm `nudge.py`, `settings_hook.py`, `mine.py` in the skills dir, `digests/` created **with today's Digest seeded by the install-time miner run**, exactly one sensei SessionStart hook in `settings.json` with an absolute `python3` command, foreign hooks intact, and re-running install leaves the hook count unchanged.
+
+### U7. uninstall.sh — remove the surface, preserve state
+
+- **Goal:** a new uninstaller that removes the hook, launchd job, and skills dir while preserving `~/.claude/sensei/` state (especially `decisions.jsonl`).
+- **Requirements:** D14. ADR-0015.
+- **Dependencies:** U2 (`settings_hook.py remove`), logical mirror of U6.
+- **Files:** `uninstall.sh` (new, repo root).
+- **Approach:**
+  - Run from the clone like `install.sh` (`set -euo pipefail`, resolve `REPO_DIR`).
+  - `settings_hook.py remove` (deletes only sensei's entry, U2) — but the installed copy lives in the skills dir; call the skills-dir copy *before* deleting the skills dir, or the repo copy. Prefer the repo copy so remove works even if the skills dir is already gone.
+  - `launchctl unload` the plist if loaded, then remove `~/Library/LaunchAgents/sh.sensei.plist`.
+  - `rm -rf "$SKILLS_DIR"` (the copied skill + scripts).
+  - **Preserve `~/.claude/sensei/`** — do not touch `decisions.jsonl`, `proposals/`, `digests/`, `events.json`, `nudge-state`, `logs/`. Announce that state is preserved.
+- **Patterns to follow:** mirror `install.sh`'s structure and `echo` progress lines; reuse `LABEL`, `PLIST_DST`, `SKILLS_DIR` variable names.
+- **Test scenarios:** `Test expectation: none — bash orchestration, not unit-tested (Design Resolutions). settings_hook.py remove is covered by U2.`
+- **Verification:** `./install.sh` then `./uninstall.sh` against a scratch `$HOME`; confirm the sensei SessionStart hook is gone (foreign hooks intact), the launchd job is unloaded and the plist removed, `$SKILLS_DIR` deleted, and everything under `~/.claude/sensei/` — decisions, proposals, digests — untouched.
+
+---
+
+## Schema seam: `decisions.jsonl` gains `baseline` (additive)
+
+The only persisted-schema change is **additive and backward-compatible**:
+
+- Accepted decisions gain an optional `"baseline": N` field (U4/D11); rejected decisions do not.
+- Existing decision lines predate the field and stay valid — no migration, no backfill (Baseline history is unrecoverable retroactively; that is accepted, D11 / Key Decision "receipt seed").
+- Nightly's cooldown/dedup (SKILL.md step 2) and the Nudge's pending logic (U3) key on `key`, never on `baseline`, so absence never breaks either path.
+- Nothing reads `baseline` this slice — it is a seed for the deferred track-record slice.
+
+---
+
+## Risks & Dependencies
+
+- **Silent-channel regression (highest).** The Nudge is invisible unless delivered as top-level `systemMessage`. Mitigation: the U3/U6 throwaway-hook probe is a hard first step, not a note. A newer CC build changing hook rendering would surface here.
+- **Boot hang from a bare `python3` (high).** A GUI-launched minimal PATH can hit the `/usr/bin/python3` CLT stub and hang session start. Mitigation: U6 resolves and registers an absolute `python3` + absolute `nudge.py`.
+- **Clobbering foreign SessionStart hooks (high, concrete).** `~/.claude/settings.json` already carries a foreign SessionStart entry (`ensure-statusline.sh`, no matcher). Mitigation: U2's marker-scoped add/remove with explicit foreign-entry-preservation tests.
+- **False failure signal on install day (medium, concrete).** Installing on an already-running system leaves `digests/<today>.json` absent until the next 05:30 run, so the latch-exempt failure line would cry wolf all day. Mitigation: U6 seeds today's Digest by running the miner once at install.
+- **Self-trigger every day (medium).** Misplacing `SENSEI_NIGHTLY` onto `mine.py` silently suppresses the user's real first session daily. Mitigation: U5 sets it on `claude`; documented trap.
+- **Local-midnight off-by-one (medium).** UTC `generated_at` feeding date logic would cause spurious "did not run". Mitigation: U1/U3 use local dates for filenames and boundary; explicit boundary tests.
+- **First write into `~/.claude/settings.json` (dependency).** Install now touches user-global config outside sensei's dir; uninstall must fully reverse it. Covered by U2 + U6 + U7 as a set.
+
+---
+
+## Verification Contract
+
+- **Automated gate:** `python3 -m unittest discover tests` green, covering `mine.py` Digest (U1), `nudge.py` (U3), and `settings_hook.py` (U2). Bash orchestration (U5/U6/U7) and the SKILL.md prose contract (U4) are verified manually per their unit Verification lines.
+- **Existing tests:** `tests/test_mine.py` is **unaffected** — the Digest is a new sibling side-write into the `--out` parent dir; no existing assertion touches it, and `TemporaryDirectory` isolates the write. (`test_time_window` runs `mine.py` twice into the same tmp dir → the same-day Digest is overwritten harmlessly, asserted by nothing.) U1 extends this file rather than replacing any case.
+- **Channel probe (manual, gating U3 & U6):** top-level `systemMessage` renders in a live CC session before nudge logic and before install wiring are declared done.
+- **End-to-end (manual):** install against a scratch `$HOME` (install seeds today's Digest, U6); first session shows the heartbeat, second session same day is silent; delete the seeded Digest → the loud failure line appears and repeats; uninstall reverses the surface and preserves state.
+- **Live-state safety:** every miner/nudge test run uses fixtures or an explicit tmp `--out`/sensei dir — never the live `~/.claude/sensei/events.json` or `decisions.jsonl`.
+
+---
+
+## Definition of Done
+
+- All seven units landed on branch `worktree-feat+nightly-digest-session-nudge`; every D-item (D1–D14, D10a) traces to a shipped change.
+- `python3 -m unittest discover tests` green, including the new U1/U2/U3 coverage.
+- The osascript notification is gone from both SKILL.md and the plist allowlist (R9).
+- Accepted decisions carry `baseline`; the Key line is machine-parseable; the Nudge parses it verbatim.
+- `./install.sh` is idempotent, registers an absolute-path SessionStart hook, preserves foreign hooks, and creates `digests/`; `./uninstall.sh` fully reverses the surface and preserves `~/.claude/sensei/` state.
+- The systemMessage channel is confirmed rendering in a live session; no bare `python3` is registered anywhere.

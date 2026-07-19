@@ -65,16 +65,18 @@ in this mode — proposals only.** That rule is absolute even if a fix looks tri
      signature of the rule's *intent* (e.g. `~/.claude/CLAUDE.md::ddev-prefix-artisan`). Two
      proposals that would edit the same rule must produce the same key even if their titles
      differ. This is what step 2 matches against and what review records in `decisions.jsonl`.
+     Emit the key as its own line, exactly: `- **Key:** <target-file>::<slug>` — this literal
+     format is a parse contract the session nudge depends on.
    - **Evidence** — 2–3 verbatim quotes from `user_text` / `assistant_context`, each tagged
      with its `project`.
+   - **Supporting events** — the qualifying cluster's event count (the size already computed
+     in step 3), as its own line: `- **Supporting events:** N`.
    - **Root cause** — one sentence.
    - **Target file** — exact path.
    - **Exact text** — the literal diff to add/change, ready to paste as-is.
 5. Write `~/.claude/sensei/proposals/YYYY-MM-DD.md` (today's date) with every qualifying
    proposal in the format above, separated by `---`. If zero patterns qualified, write a
    one-line file: `# YYYY-MM-DD — nothing today (N events scanned, 0 qualifying patterns)`.
-6. Notify: `osascript -e 'display notification "N proposals" with title "sensei"'` (N = number
-   of proposals written, or 0).
 
 ## Mode: review
 
@@ -97,5 +99,11 @@ Interactive, run by the human in the morning.
    {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted|rejected", "target": "..."}
    ```
    Copy the `key` verbatim from the proposal — the cooldown and dedup in nightly step 2 depend
-   on it being stable across runs.
+   on it being stable across runs. When the proposal is **accepted**, additionally copy its
+   `Supporting events` value into the decision as `"baseline": N`:
+   ```json
+   {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted", "target": "...", "baseline": N}
+   ```
+   Rejected decisions carry no `baseline` field. This seeds a future track-record slice; nothing
+   reads it yet.
 4. When all proposals in the file are decided, tell the user how many were accepted/rejected.
