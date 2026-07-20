@@ -1,9 +1,11 @@
 # sensei — the self-improving Claude Code setup
 
-A nightly agent that mines your own Claude Code transcripts for friction — corrections,
-tool-use denials, interrupts — clusters the recurring patterns, and drafts concrete diffs to
-your `~/.claude/CLAUDE.md` and skills. You review them over coffee; nothing changes your config
-until you accept it.
+A nightly agent that mines your own Claude Code transcripts — for friction (corrections,
+tool-use denials, interrupts) *and* for habits (directives you re-supply every session with no
+friction at all) — clusters the recurring patterns, and drafts concrete diffs to your
+`~/.claude/CLAUDE.md` and skills. If a rule it already installed keeps failing to stick, it
+escalates to a proposed hook instead of a prose edit. You review everything over coffee; nothing
+changes your config, and no hook is ever installed, until you accept it.
 
 ## Requirements
 
@@ -30,14 +32,16 @@ preserves everything under `~/.claude/sensei/` (decisions, proposals, digests, l
 ## How it works (three parts)
 
 1. **Miner** — `mine.py`. Deterministic, zero-token, stdlib-only Python. The only component that
-   reads raw transcripts (`~/.claude/projects/**/*.jsonl`); it emits friction events to
+   reads raw transcripts (`~/.claude/projects/**/*.jsonl`); it emits friction and repeat events to
    `~/.claude/sensei/events.json` and touches nothing else (ADR-0001).
 2. **Skill** — `~/.claude/skills/sensei/`. Two modes:
    - `/sensei nightly` — headless, run by launchd. Reads the mined events, clusters them, and
-     writes a proposal report to `~/.claude/sensei/proposals/YYYY-MM-DD.md`. **Never edits config**
-     — it physically can't (ADR-0002, ADR-0005).
-   - `/sensei review` — interactive, run by you in the morning. Walks the proposals one at a time
-     and applies the ones you accept.
+     writes a proposal report to `~/.claude/sensei/proposals/YYYY-MM-DD.md` — a prose edit, a
+     habit-rule, or (if an already-accepted rule keeps failing to stick) a proposed hook.
+     **Never edits config** — it physically can't (ADR-0002, ADR-0005).
+   - `/sensei review` — interactive, run by you in the morning. Walks the proposals one at a time,
+     runs a short "why?" on any reject, and applies the prose/habit-rule proposals you accept. A
+     hook proposal is presented, never applied — you install it.
 3. **Scheduler** — a launchd agent (`sh.sensei`) that runs the miner and then `/sensei nightly`
    at 05:30, logging to `~/.claude/sensei/logs/nightly.log`. The miner also writes a dated
    Digest (`~/.claude/sensei/digests/YYYY-MM-DD.json`) — its presence is proof the patrol ran.

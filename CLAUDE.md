@@ -22,7 +22,9 @@
 - Python is stdlib-only — no dependencies, no venv, ever (ADR-0008).
 - macOS-only by design (launchd) — don't add Linux/Windows portability shims (ADR-0007).
 - Miner favors recall; precision is the LLM's job — don't "fix" over-capture in the regex
-  (ADR-0004).
+  (ADR-0004). Bounded exception: `repeat` events are thinned structurally (glue blocklist,
+  length floor, non-ubiquity), never lexically — scoped precisely to `repeat`; friction
+  detection stays greedy (ADR-0011).
 
 ## Agent skills
 
