@@ -257,8 +257,9 @@ def main():
     all_events.sort(key=lambda e: e["ts"] or "", reverse=True)
     all_events = all_events[:MAX_TOTAL]
 
+    generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
     out = {
-        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "generated_at": generated_at,
         "days": args.days,
         "sessions_scanned": sessions_scanned,
         "events": all_events,
@@ -266,6 +267,35 @@ def main():
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(out, f, indent=2)
+
+    # Digest: a per-day, human-facing artifact whose mere presence proves the
+    # nightly patrol ran (ADR-0014). Written here, not by the LLM stage, so it
+    # survives a broken chain. `date` is local — never derived from the UTC
+    # `generated_at` above — to match the Nudge's local-time failure check.
+    by_type = {}
+    by_project = {}
+    for e in all_events:
+        by_type[e["type"]] = by_type.get(e["type"], 0) + 1
+        # friction events carry a single `project`; `repeat` events span several and
+        # carry `projects` (ADR-0011) — count the repeat under each of its projects.
+        projects = e.get("projects") or [e.get("project")]
+        for p in projects:
+            if p:
+                by_project[p] = by_project.get(p, 0) + 1
+    local_date = dt.datetime.now().date().isoformat()
+    digest = {
+        "date": local_date,
+        "generated_at": generated_at,
+        "sessions_scanned": sessions_scanned,
+        "events_total": len(all_events),
+        "by_type": by_type,
+        "by_project": by_project,
+    }
+    digest_dir = os.path.join(os.path.dirname(args.out), "digests")
+    os.makedirs(digest_dir, exist_ok=True)
+    with open(os.path.join(digest_dir, f"{local_date}.json"), "w") as f:
+        json.dump(digest, f, indent=2)
+
     print(f"sensei-mine: scanned {sessions_scanned} sessions, {len(all_events)} events -> {args.out}")
 
 if __name__ == "__main__":

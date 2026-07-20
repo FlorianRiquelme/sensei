@@ -29,11 +29,13 @@ State lives under `~/.claude/sensei/`:
   text after the interrupt, if any). `repeat` events carry `session_count` and `projects`
   instead of a single session — they're already cross-session by construction.
 - `decisions.jsonl` — append-only log of every past verdict:
-  `{"date", "title", "key", "verdict", "target", "reason", "reason_kind", "tier"}`.
+  `{"date", "title", "key", "verdict", "target", "reason", "reason_kind", "tier", "baseline"}`.
   `verdict` is one of `accepted`, `reject-retry-narrower`, `reject-not-wanted`, or the legacy
   bare `rejected`. `reason`/`reason_kind` are only present on the two structured reject
   verdicts (see review step 3). `tier` is only present on an **accepted** decision that came
   from a hook proposal (`tier: "hook"`) — its absence means prose/habit-rule, the default tier.
+  `baseline` is the qualifying event count captured on an **accepted** prose/habit-rule decision
+  (see review step 3); nothing reads it yet.
 - `proposals/YYYY-MM-DD.md` — one report per nightly run.
 - `logs/nightly.log` — launchd stdout/stderr.
 
@@ -112,22 +114,28 @@ it produces a ready artifact but never writes it.
        signature of the rule's *intent* (e.g. `~/.claude/CLAUDE.md::ddev-prefix-artisan`). Two
        proposals that would edit the same rule must produce the same key even if their titles
        differ. This is what step 2 matches against and what review records in `decisions.jsonl`.
+       Emit the key as its own line, exactly: `- **Key:** <target-file>::<slug>` — this literal
+       format is a parse contract the session nudge depends on, and every proposal shape below
+       emits it.
      - **Evidence** — 2–3 verbatim quotes from `user_text` / `assistant_context`, each tagged
        with its `project`.
+     - **Supporting events** — the qualifying cluster's event count (the size already computed
+       in step 3), as its own line: `- **Supporting events:** N`.
      - **Root cause** — one sentence.
      - **Target file** — exact path.
      - **Exact text** — the literal diff to add/change, ready to paste as-is.
 
    - **Habit-rule proposal** (repeat pattern) — same shape as a prose proposal (title, key,
-     evidence, root cause, target file, exact text), except evidence is drawn from the `repeat`
-     event's re-supplied phrasing (tag each quote with its `project` from the event's `projects`
-     list) and root cause reads as "you re-supply this every session" rather than "this caused
-     friction." The exact text is still a normal prose rule for CLAUDE.md/SKILL.md.
+     evidence, supporting events, root cause, target file, exact text), except evidence is drawn
+     from the `repeat` event's re-supplied phrasing (tag each quote with its `project` from the
+     event's `projects` list) and root cause reads as "you re-supply this every session" rather
+     than "this caused friction." The exact text is still a normal prose rule for CLAUDE.md/SKILL.md.
 
    - **Hook proposal** (escalation, from step 2's exception) — a pattern already covered by an
      accepted rule but still qualifying past the grace period escalates instead of being skipped.
      Keep the **same `key`** as the original accepted decision (same rule, hardened — not a new
-     rule); set **`target`** to the hook's install path (e.g. `~/.claude/settings.json` or a
+     rule), still emitted as its own `- **Key:**` line per the parse contract above; set
+     **`target`** to the hook's install path (e.g. `~/.claude/settings.json` or a
      project-scoped `.claude/settings.json`). Review, when this proposal is accepted, must record
      `tier: "hook"` on the decision line (step 3) — that's what lets a future run's terminal check
      (step 2) recognize this key is already at the hook tier and stop escalating. Produce a
@@ -146,8 +154,6 @@ it produces a ready artifact but never writes it.
    proposal in the format above, separated by `---`. Label each proposal's kind (prose /
    habit-rule / hook) so review knows how to handle it. If zero patterns qualified, write a
    one-line file: `# YYYY-MM-DD — nothing today (N events scanned, 0 qualifying patterns)`.
-6. Notify: `osascript -e 'display notification "N proposals" with title "sensei"'` (N = number
-   of proposals written, or 0).
 
 ## Mode: review
 
@@ -190,11 +196,13 @@ Interactive, run by the human in the morning.
    - For every proposal (accepted, rejected, or edited-then-accepted), append one line to
      `~/.claude/sensei/decisions.jsonl`:
      ```json
-     {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted|reject-retry-narrower|reject-not-wanted", "target": "...", "reason": "...", "reason_kind": "steering|config-truth", "tier": "hook"}
+     {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted|reject-retry-narrower|reject-not-wanted", "target": "...", "reason": "...", "reason_kind": "steering|config-truth", "tier": "hook", "baseline": N}
      ```
      Omit `reason`/`reason_kind` on `accepted` lines — they only apply to the two reject
-     verdicts. Omit `tier` entirely except on an accepted hook decision. Copy the `key` verbatim
-     from the proposal — the cooldown, dedup, and escalation
-     logic in nightly step 2 all depend on it being stable across runs.
+     verdicts. Omit `tier` entirely except on an accepted hook decision. On an **accepted** prose
+     or habit-rule line, additionally copy the proposal's `Supporting events` value as
+     `baseline: N`; rejected and hook lines carry no `baseline` (nothing reads it yet — it seeds a
+     future track-record slice). Copy the `key` verbatim from the proposal — the cooldown, dedup,
+     and escalation logic in nightly step 2 all depend on it being stable across runs.
 4. When all proposals in the file are decided, tell the user how many were accepted/rejected,
    and call out any hook proposals that still need manual installation.

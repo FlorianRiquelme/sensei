@@ -12,6 +12,9 @@ def run_mine(projects_dir, out_path, days=0):
     with open(out_path) as f:
         return json.load(f)
 
+def digest_path_for(out_path):
+    return os.path.join(os.path.dirname(out_path), "digests", f"{dt.datetime.now().date().isoformat()}.json")
+
 
 class TestMineFixtures(unittest.TestCase):
     def test_fixtures_all_time(self):
@@ -302,6 +305,62 @@ class TestMineDynamic(unittest.TestCase):
 
         repeats = [e for e in data["events"] if e["type"] == "repeat"]
         self.assertLessEqual(len(repeats), mine_mod.REPEAT_TOP_K)
+
+
+class TestMineDigest(unittest.TestCase):
+    def test_digest_fields_and_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(FIXTURES, out_path, days=0)
+            with open(digest_path_for(out_path)) as f:
+                digest = json.load(f)
+
+        for field in ("date", "generated_at", "sessions_scanned", "events_total", "by_type", "by_project"):
+            self.assertIn(field, digest)
+
+        self.assertEqual(digest["events_total"], len(data["events"]))
+        self.assertEqual(digest["sessions_scanned"], data["sessions_scanned"])
+        self.assertEqual(sum(digest["by_type"].values()), digest["events_total"])
+        self.assertEqual(sum(digest["by_project"].values()), digest["events_total"])
+        self.assertEqual(digest["by_type"].get("correction"), 1)
+        self.assertEqual(digest["by_type"].get("denial"), 1)
+        self.assertEqual(digest["by_type"].get("interrupt"), 1)
+        self.assertEqual(digest["by_project"].get("project-a"), 1)
+        self.assertEqual(digest["by_project"].get("project-b"), 2)
+        self.assertEqual(digest["date"], dt.datetime.now().date().isoformat())
+
+    def test_digest_local_date_not_derived_from_utc_generated_at(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(FIXTURES, out_path, days=0)
+            with open(digest_path_for(out_path)) as f:
+                digest = json.load(f)
+
+        self.assertEqual(digest["date"], dt.datetime.now().date().isoformat())
+        self.assertNotEqual(digest["date"], digest["generated_at"])
+
+    def test_digest_durable_across_same_day_reruns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(FIXTURES, out_path, days=0)
+            run_mine(FIXTURES, out_path, days=0)
+            with open(digest_path_for(out_path)) as f:
+                digest = json.load(f)
+
+        self.assertEqual(digest["events_total"], 3)
+
+    def test_digest_zero_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects")
+            os.makedirs(proj_dir)
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(proj_dir, out_path, days=0)
+            with open(digest_path_for(out_path)) as f:
+                digest = json.load(f)
+
+        self.assertEqual(digest["events_total"], 0)
+        self.assertEqual(digest["by_type"], {})
+        self.assertEqual(digest["by_project"], {})
 
 
 if __name__ == "__main__":

@@ -58,3 +58,15 @@ Review's short "why?" probe run on every reject, before recording a verdict — 
 **Proposal key**:
 A Proposal's stable identity — target file plus a normalized rule signature — independent of its LLM-generated title. The thing a Decision is matched on, so re-worded duplicates of the same rule collapse to one identity.
 _Avoid_: title (as a dedup key)
+
+**Digest**:
+The dated proof-of-patrol artifact the Miner writes every night before the LLM stage runs — sessions scanned and event counts by type and by project. Miner-owned and deterministic: it carries only what the Miner knows, never proposals (which the LLM stage writes later). Its absence for a night is the failure signal; pending-proposal state is read live by the Nudge, not stored here.
+_Avoid_: report, summary, log
+
+**Nudge**:
+The SessionStart line that carries the Digest's payload into the session: a heartbeat on quiet nights, a pending-proposal pointer, or a loud "nightly did not run". The sole discovery surface. Fires once per calendar day in the healthy state (Digest present); the failure line is exempt and repeats every session until the Digest appears or the day turns over — a broken patrol stays loud.
+_Avoid_: notification, banner
+
+**Baseline**:
+The pattern's pre-acceptance event count, stored on a Decision at accept time. The seed for future friction receipts; nothing reads it yet.
+_Avoid_: receipt (the receipt is the future report computed from a Baseline)

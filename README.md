@@ -9,8 +9,8 @@ changes your config, and no hook is ever installed, until you accept it.
 
 ## Requirements
 
-- **macOS.** The scheduler is a launchd agent and notifications use `osascript` — both macOS-only,
-  by design (ADR-0007). There is no Linux/Windows fallback.
+- **macOS.** The scheduler is a launchd agent — macOS-only, by design (ADR-0007). There is no
+  Linux/Windows fallback.
 - **Python 3** (system Python is fine — the miner is standard-library only, no deps, no venv; ADR-0008).
 - **Claude Code** on your `PATH` (the `claude` CLI).
 
@@ -20,11 +20,14 @@ changes your config, and no hook is ever installed, until you accept it.
 ./install.sh
 ```
 
-Idempotent. It copies the skill and miner into `~/.claude/skills/sensei/`, creates the state
-dirs under `~/.claude/sensei/`, resolves the launchd job for your user, and loads it. The job
-runs daily at **05:30**. The clone is disposable afterward — nothing runs from the repo (ADR-0009).
+Idempotent. It copies the skill, miner, and session nudge into `~/.claude/skills/sensei/`,
+creates the state dirs under `~/.claude/sensei/`, registers a SessionStart hook in
+`~/.claude/settings.json` (preserving any hooks already there), resolves the launchd job for
+your user, and loads it. The job runs daily at **05:30**. The clone is disposable afterward —
+nothing runs from the repo (ADR-0009).
 
-To uninstall: `launchctl unload ~/Library/LaunchAgents/sh.sensei.plist && rm ~/Library/LaunchAgents/sh.sensei.plist`.
+To uninstall, from the clone: `./uninstall.sh`. Removes the hook, launchd job, and skills dir;
+preserves everything under `~/.claude/sensei/` (decisions, proposals, digests, logs).
 
 ## How it works (three parts)
 
@@ -40,7 +43,11 @@ To uninstall: `launchctl unload ~/Library/LaunchAgents/sh.sensei.plist && rm ~/L
      runs a short "why?" on any reject, and applies the prose/habit-rule proposals you accept. A
      hook proposal is presented, never applied — you install it.
 3. **Scheduler** — a launchd agent (`sh.sensei`) that runs the miner and then `/sensei nightly`
-   at 05:30, logging to `~/.claude/sensei/logs/nightly.log`.
+   at 05:30, logging to `~/.claude/sensei/logs/nightly.log`. The miner also writes a dated
+   Digest (`~/.claude/sensei/digests/YYYY-MM-DD.json`) — its presence is proof the patrol ran.
+4. **Nudge** — `nudge.py`, a SessionStart hook. Prints one line in your first Claude Code
+   session of the day: a quiet heartbeat, a pending-proposals reminder, or a loud warning if
+   last night's Digest is missing.
 
 ## Other languages
 

@@ -11,13 +11,22 @@ LABEL="sh.sensei"
 PLIST_TEMPLATE="$REPO_DIR/sh.sensei.plist.template"
 PLIST_DST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-echo "sensei: installing skill + miner -> $SKILLS_DIR"
+echo "sensei: installing skill + miner + nudge -> $SKILLS_DIR"
 mkdir -p "$SKILLS_DIR"
 cp "$REPO_DIR/skill/SKILL.md" "$SKILLS_DIR/SKILL.md"
 cp "$REPO_DIR/mine.py" "$SKILLS_DIR/mine.py"
+cp "$REPO_DIR/nudge.py" "$SKILLS_DIR/nudge.py"
+cp "$REPO_DIR/settings_hook.py" "$SKILLS_DIR/settings_hook.py"
 
-echo "sensei: ensuring state dirs -> $SENSEI_DIR/{proposals,logs}"
-mkdir -p "$SENSEI_DIR/proposals" "$SENSEI_DIR/logs"
+echo "sensei: ensuring state dirs -> $SENSEI_DIR/{proposals,digests,logs}"
+mkdir -p "$SENSEI_DIR/proposals" "$SENSEI_DIR/digests" "$SENSEI_DIR/logs"
+
+echo "sensei: seeding today's digest"
+PYTHON3="$(command -v python3)"
+"$PYTHON3" "$SKILLS_DIR/mine.py" --days 1
+
+echo "sensei: registering SessionStart nudge hook -> $HOME/.claude/settings.json"
+"$PYTHON3" "$SKILLS_DIR/settings_hook.py" add --command "$PYTHON3 $SKILLS_DIR/nudge.py"
 
 echo "sensei: installing launchd job -> $PLIST_DST"
 sed "s|__HOME__|$HOME|g" "$PLIST_TEMPLATE" > "$PLIST_DST"
@@ -29,3 +38,4 @@ fi
 launchctl load "$PLIST_DST"
 
 echo "sensei: installed. Runs daily 05:30 via launchd; logs -> $SENSEI_DIR/logs/nightly.log"
+echo "sensei: session nudge active — one line at the start of your first session each day"
