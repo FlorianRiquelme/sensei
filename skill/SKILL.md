@@ -29,7 +29,9 @@ State lives under `~/.claude/sensei/`:
   `denial`, `interrupt`, or `repeat`. `correction`/`interrupt` events carry a raw
   `nth_in_session` ordinal; `interrupt` events also carry `followup_text` (the next plain user
   text after the interrupt, if any). `repeat` events carry `session_count` and `projects`
-  instead of a single session — they're already cross-session by construction.
+  instead of a single session — they're already cross-session by construction. A top-level
+  `_meta` block (`parse_errors`, `capped_sessions`, `total_capped`, `unreadable_files`) reports
+  the miner's own silent drops (GitHub #18); ignore it when clustering events.
 - `ledger.json` — latest effectiveness-ledger output (overwritten each run, ADR-0016). One row
   per accepted rule (`key`): `standing` (`working` | `not_working` | `inconclusive` |
   `not_measurable_yet`), `trigger_present` (false for a rule with no inferable trigger — those

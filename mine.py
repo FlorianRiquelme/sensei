@@ -240,11 +240,14 @@ def load_untriggered_keys(decisions_path):
 
 def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=None, ledger_cutoff=None):
     """Read one transcript once. Returns (events, in_friction_window, in_repeat_window,
-    repeat_phrases, earliest_ts) — repeat_phrases is the set of this session's normalized
-    candidate phrases within the repeat window; non-ubiquity is computed across sessions
-    in main(). `anchors` (optional, mutated in place) are effectiveness-ledger anchors
-    (ADR-0016) accumulating opportunity/friction counts per slice as this same walk reads
-    each record — no second pass over the transcript."""
+    repeat_phrases, earliest_ts, meta) — repeat_phrases is the set of this session's
+    normalized candidate phrases within the repeat window; non-ubiquity is computed across
+    sessions in main(). `anchors` (optional, mutated in place) are effectiveness-ledger
+    anchors (ADR-0016) accumulating opportunity/friction counts per slice as this same walk
+    reads each record — no second pass over the transcript. earliest_ts is the oldest record
+    timestamp seen (the ledger read-floor). meta = {"parse_errors", "capped", "unreadable"} —
+    this session's silent-drop counts (GitHub #18); "capped" is True if a qualifying friction
+    event was dropped because MAX_PER_SESSION was already reached."""
     events = []
     repeat_phrases = set()
     in_friction_window = friction_cutoff is None
@@ -257,12 +260,15 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
     interrupt_n = 0
     anchors = anchors or []
     earliest_ts = None
+    parse_errors = 0
+    session_capped = False
 
     try:
         with open(fp, errors="ignore") as f:
             lines = f.readlines()
     except OSError:
-        return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts
+        meta = {"parse_errors": 0, "capped": False, "unreadable": True}
+        return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts, meta
 
     for line in lines:
         line = line.strip()
@@ -271,6 +277,7 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
         try:
             r = json.loads(line)
         except Exception:
+            parse_errors += 1
             continue
         if r.get("isSidechain") or r.get("isMeta"):
             continue
@@ -335,12 +342,15 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
             low = result_text.lower()
             if "doesn't want to proceed" in low or "user rejected" in low:
                 tname, tinput, matched = tool_uses.get(b.get("tool_use_id"), ("?", "", {}))
-                if friction_ok and len(events) < MAX_PER_SESSION:
-                    events.append({
-                        "ts": ts, "project": project, "session": session, "type": "denial",
-                        "user_text": "", "assistant_context": last_assistant_text[:500],
-                        "tool": tname, "tool_input": tinput,
-                    })
+                if friction_ok:
+                    if len(events) < MAX_PER_SESSION:
+                        events.append({
+                            "ts": ts, "project": project, "session": session, "type": "denial",
+                            "user_text": "", "assistant_context": last_assistant_text[:500],
+                            "tool": tname, "tool_input": tinput,
+                        })
+                    else:
+                        session_capped = True
                 for idx, slice_name in matched.items():
                     anchor = anchors[idx]
                     if slice_name == "current":
@@ -427,6 +437,10 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
                     "nth_in_session": correction_n,
                 })
                 continue
+        elif friction_ok and (is_interrupt or is_correction):
+            # qualifying event dropped because the session already hit MAX_PER_SESSION
+            # (KTD-4) — do not append, do not set pending_interrupt on a dropped interrupt.
+            session_capped = True
 
         # repeat candidacy: plain directive text with no friction at all — excludes
         # interrupts, slash commands, and anything already flagged as a correction.
@@ -435,7 +449,22 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
             if len(norm) >= REPEAT_LENGTH_FLOOR and norm not in REPEAT_GLUE_BLOCKLIST:
                 repeat_phrases.add(norm)
 
-    return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts
+    meta = {"parse_errors": parse_errors, "capped": session_capped, "unreadable": False}
+    return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts, meta
+
+def within_window(fp, cutoff):
+    """True if fp was last modified within the scan window (or cutoff is None = all time).
+    Scopes the miner's own drop counts (parse_errors/unreadable_files, GitHub #18) to the
+    window it reports on: a malformed line has no timestamp and an unreadable file is never
+    read, so without an mtime gate ancient history would accumulate forever and permanently
+    trip the nudge. Favors recall on stat failure (ADR-0004): when mtime is unknowable, count it."""
+    if cutoff is None:
+        return True
+    try:
+        mtime = dt.datetime.fromtimestamp(os.path.getmtime(fp), dt.timezone.utc)
+    except OSError:
+        return True
+    return mtime >= cutoff
 
 def main():
     ap = argparse.ArgumentParser()
@@ -453,6 +482,8 @@ def main():
     if args.days > 0:
         friction_cutoff = now - dt.timedelta(days=args.days)
         repeat_cutoff = now - dt.timedelta(days=REPEAT_WINDOW_DAYS)
+    # widest window the scan considers, for scoping the drop counts (GitHub #18)
+    scan_cutoff = min(friction_cutoff, repeat_cutoff) if friction_cutoff else None
 
     # effectiveness ledger (ADR-0016): anchors are derived once up front, then
     # accumulated in the same per-file walk below — no second pass over transcripts.
@@ -476,15 +507,27 @@ def main():
     repeat_sessions_total = 0
     phrase_sessions = {}  # normalized phrase -> set of (project, session)
     earliest_ts_overall = None
+    parse_errors_total = 0
+    capped_sessions = 0
+    unreadable_files = 0
 
     for fp in files:
         project = os.path.basename(os.path.dirname(fp))
         session = os.path.splitext(os.path.basename(fp))[0]
-        events, in_friction, in_repeat, phrases, earliest_ts = mine_session(
+        events, in_friction, in_repeat, phrases, earliest_ts, meta = mine_session(
             fp, project, session, friction_cutoff, repeat_cutoff, anchors, ledger_cutoff=ledger_cutoff
         )
         if earliest_ts is not None and (earliest_ts_overall is None or earliest_ts < earliest_ts_overall):
             earliest_ts_overall = earliest_ts
+        # parse_errors/unreadable have no in-window timestamp of their own, so scope them
+        # by file mtime (GitHub #18); capped is already window-scoped via friction_ok.
+        recent = within_window(fp, scan_cutoff)
+        if recent:
+            parse_errors_total += meta["parse_errors"]
+        if meta["capped"]:
+            capped_sessions += 1
+        if meta["unreadable"] and recent:
+            unreadable_files += 1
         if in_friction or in_repeat:
             sessions_scanned += 1
         if in_friction:
@@ -511,7 +554,15 @@ def main():
             })
 
     all_events.sort(key=lambda e: e["ts"] or "", reverse=True)
+    total_capped = max(0, len(all_events) - MAX_TOTAL)
     all_events = all_events[:MAX_TOTAL]
+
+    meta = {
+        "parse_errors": parse_errors_total,
+        "capped_sessions": capped_sessions,
+        "total_capped": total_capped,
+        "unreadable_files": unreadable_files,
+    }
 
     generated_at = dt.datetime.now(dt.timezone.utc).isoformat()
     out = {
@@ -519,6 +570,7 @@ def main():
         "days": args.days,
         "sessions_scanned": sessions_scanned,
         "events": all_events,
+        "_meta": meta,
     }
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
@@ -598,6 +650,7 @@ def main():
         "events_total": len(all_events),
         "by_type": by_type,
         "by_project": by_project,
+        "_meta": meta,
     }
     digest_dir = os.path.join(os.path.dirname(args.out), "digests")
     os.makedirs(digest_dir, exist_ok=True)

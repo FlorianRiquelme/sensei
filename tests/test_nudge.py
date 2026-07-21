@@ -14,7 +14,7 @@ def run_nudge(sensei_dir, now, env_extra=None):
     )
     return result
 
-def write_digest(sensei_dir, date_str, sessions_scanned=0, events_total=0, by_type=None, by_project=None):
+def write_digest(sensei_dir, date_str, sessions_scanned=0, events_total=0, by_type=None, by_project=None, meta=None):
     digests_dir = os.path.join(sensei_dir, "digests")
     os.makedirs(digests_dir, exist_ok=True)
     digest = {
@@ -25,6 +25,8 @@ def write_digest(sensei_dir, date_str, sessions_scanned=0, events_total=0, by_ty
         "by_type": by_type or {},
         "by_project": by_project or {},
     }
+    if meta is not None:
+        digest["_meta"] = meta
     with open(os.path.join(digests_dir, f"{date_str}.json"), "w") as f:
         json.dump(digest, f)
 
@@ -77,6 +79,65 @@ class TestNudge(unittest.TestCase):
             self.assertIn("0 proposals", payload["systemMessage"])
             with open(os.path.join(tmp, "nudge-state")) as f:
                 self.assertEqual(f.read().strip(), "2026-07-19")
+
+    def test_leak_warning_over_threshold_heartbeat_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", sessions_scanned=6, events_total=14, meta={
+                "parse_errors": 0, "capped_sessions": 0, "total_capped": 5, "unreadable_files": 0,
+            })
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertIn("scanned 6 sessions", payload["systemMessage"])
+            self.assertIn("missing signal", payload["systemMessage"])
+
+    def test_leak_warning_over_threshold_pending_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", meta={
+                "parse_errors": 0, "capped_sessions": 1, "total_capped": 0, "unreadable_files": 0,
+            })
+            write_proposal(tmp, "2026-07-14", (
+                "## Proposal one\n"
+                "- **Key:** ~/.claude/CLAUDE.md::foo-rule\n"
+            ))
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertIn("proposal waiting", payload["systemMessage"])
+            self.assertIn("/sensei review", payload["systemMessage"])
+            self.assertIn("missing signal", payload["systemMessage"])
+
+    def test_leak_warning_under_threshold_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", sessions_scanned=6, events_total=14, meta={
+                "parse_errors": 3, "capped_sessions": 0, "total_capped": 0, "unreadable_files": 0,
+            })
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertNotIn("missing signal", payload["systemMessage"])
+
+    def test_leak_warning_absent_meta_no_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", sessions_scanned=6, events_total=14)
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertNotIn("missing signal", payload["systemMessage"])
+            self.assertIn("scanned 6 sessions", payload["systemMessage"])
+
+    def test_leak_warning_corrupt_meta_no_crash(self):
+        # a hand-edited/corrupted digest with non-numeric _meta values must not crash the
+        # nudge (which runs on every session start) nor suppress the base line.
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", sessions_scanned=6, events_total=14, meta={
+                "parse_errors": "x", "capped_sessions": None, "total_capped": "lots", "unreadable_files": [],
+            })
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertNotIn("missing signal", payload["systemMessage"])
+            self.assertIn("scanned 6 sessions", payload["systemMessage"])
 
     def test_pending_line_reports_count_and_oldest(self):
         with tempfile.TemporaryDirectory() as tmp:

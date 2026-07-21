@@ -9,6 +9,11 @@ import argparse, glob, json, os, re, sys, datetime as dt
 
 NIGHTLY_HOUR, NIGHTLY_MINUTE = 5, 30  # mirrors sh.sensei.plist.template's StartCalendarInterval
 
+# GitHub #18: cap hits and unreadable files are rare and each means real lost signal, so
+# flag on first occurrence; a handful of malformed lines is normal transcript noise, so
+# gate parse_errors behind a small floor. Tune here if real-world digests show it's off.
+PARSE_ERRORS_FLOOR = 10
+
 KEY_RE = re.compile(r"^- \*\*Key:\*\*\s*(.+)$", re.MULTILINE)
 
 def expected_date(now):
@@ -86,6 +91,41 @@ def compute_pending(proposals_dir, decided_keys):
         return {"degraded": False, "count": len(pending_keys), "oldest": oldest}
     return None
 
+def _int(v):
+    """Coerce a `_meta` value to int, defaulting to 0 — a hand-edited or corrupted digest
+    may carry a non-numeric value, and this runs on every session start (never raise)."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+def _plural(n, word):
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+def leak_warning(meta):
+    """Compact summary of the miner's own silent drops (GitHub #18), or None below
+    threshold. `meta` is a digest's `_meta` block (may be missing/partial/corrupt — read
+    defensively so a pre-existing digest without `_meta`, or one with non-numeric values,
+    yields no warning, never an error)."""
+    total_capped = _int(meta.get("total_capped", 0))
+    capped_sessions = _int(meta.get("capped_sessions", 0))
+    unreadable_files = _int(meta.get("unreadable_files", 0))
+    parse_errors = _int(meta.get("parse_errors", 0))
+
+    if not (total_capped > 0 or capped_sessions > 0 or unreadable_files > 0 or parse_errors >= PARSE_ERRORS_FLOOR):
+        return None
+
+    parts = []
+    if capped_sessions > 0:
+        parts.append(f"{_plural(capped_sessions, 'session')} hit the per-session cap")
+    if total_capped > 0:
+        parts.append(f"{_plural(total_capped, 'event')} dropped past the global cap")
+    if unreadable_files > 0:
+        parts.append(_plural(unreadable_files, "unreadable file"))
+    if parse_errors >= PARSE_ERRORS_FLOOR:
+        parts.append(f"{parse_errors} parse errors")
+    return ", ".join(parts)
+
 def emit(system_message, additional_context=None):
     payload = {"systemMessage": system_message}
     if additional_context:
@@ -129,6 +169,10 @@ def run(sensei_dir, now):
             f"sensei: last night scanned {digest.get('sessions_scanned', 0)} sessions, "
             f"{digest.get('events_total', 0)} events, 0 proposals"
         )
+
+    warning = leak_warning(digest.get("_meta") or {})
+    if warning:
+        line = f"{line} | sensei may be missing signal: {warning}"
 
     emit(line)
     with open(state_path, "w") as f:
