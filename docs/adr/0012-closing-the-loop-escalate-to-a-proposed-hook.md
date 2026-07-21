@@ -56,3 +56,11 @@ would block a legitimately valuable hook.
 
 Collapses issue #11 into this mechanism; extends ADR-0002 (applies prose, proposes code); consumes
 accepted-decision dates from ADR-0003 / `decisions.jsonl`; fed by events from ADR-0010/0011.
+
+**The deferred rate-comparison is now built.** The "friction *rate* didn't drop" signal this ADR
+called the honest one but deferred as "new state" is realized — with no new state — by the
+effectiveness ledger (ADR-0016). The two run as parallel lenses: this ADR's proxy is the *action*
+arm (drafts a hook proposal), the ledger is the *measurement* arm (reports a deterministic
+verdict). They are deliberately **not** wired together in v1 — letting a ledger *Not working*
+verdict drive escalation is acting on the measurement, firewalled by ADR-0002 — and convergence is
+future work, not built.

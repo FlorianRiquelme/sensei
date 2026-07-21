@@ -68,5 +68,21 @@ The SessionStart line that carries the Digest's payload into the session: a hear
 _Avoid_: notification, banner
 
 **Baseline**:
-The pattern's pre-acceptance event count, stored on a Decision at accept time. The seed for future friction receipts; nothing reads it yet.
+The pattern's pre-acceptance event count, stored on a Decision at accept time. A **fallback seed** for the Effectiveness ledger, not its primary reading: the ledger re-derives the real pre-acceptance number with the rule's own Trigger (same instrument on both sides), and falls back to this stored count only when the pre-accept transcripts have aged out of the read window (ADR-0016).
 _Avoid_: receipt (the receipt is the future report computed from a Baseline)
+
+**Trigger**:
+A machine-checkable matcher attached to an accepted rule — one of a tool name, a keyword/substring, or a path glob (no arbitrary regex). **Authored by the LLM at proposal time**, only when one is genuinely inferable, and **executed deterministically by the Miner** at measurement time. Optional: a rule with no inferable trigger carries none and is *Not measurable yet*. Its absence never affects cooldown or dedup, which key on the stable Proposal key.
+_Avoid_: matcher, rule (the trigger measures a rule, it isn't the rule), regex
+
+**Opportunity**:
+A Trigger-context occurrence *regardless of whether it caused friction* — the denominator of the Effectiveness ledger. Opportunities present with friction gone is what makes a *Working* Standing honest, as distinct from *Inconclusive* (the situation never arose). Counted by the Miner inside its existing single transcript walk.
+_Avoid_: occurrence (unqualified), sample
+
+**Effectiveness ledger**:
+The per-rule track record the Miner computes each run by a deterministic, zero-token join of `decisions.jsonl` (Trigger, accept date, fallback Baseline) against the mined event window: rule key → pre-accept friction, current friction, opportunities, days-since-accept, over two equal fixed-width slices (pre-accept and current). Recomputed from scratch each run, never accumulated (ADR-0010/0016). Rendered one line per rule by the `/sensei status` mode.
+_Avoid_: report, receipt, scorecard, track record (the ledger *is* the track record — use the one name)
+
+**Standing**:
+A rule's measured effectiveness in the ledger, one of four honest-by-construction values: *Working* (opportunities present, friction gone), *Not working* (opportunities present, friction persists), *Inconclusive* (no opportunities this window), *Not measurable yet* (no Trigger, or within the shared grace period). At small N the Standing defaults toward *Inconclusive* rather than a confident *Working*/*Not working* — a Standing is only as strong as its denominator (ADR-0016).
+_Avoid_: verdict (reserved for the Decision field), status, grade, rating
