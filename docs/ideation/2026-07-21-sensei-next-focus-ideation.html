@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: sensei — what to focus on next</title>
+<style>
+  :root{
+    --bg:#faf9f7; --surface:#ffffff; --surface-2:#f3f1ec; --ink:#1f1d1a; --ink-2:#57534e;
+    --muted:#8a847c; --line:#e5e1da; --line-2:#d8d3ca;
+    --accent:#3f5f8f; --accent-soft:#e9eef6; --accent-ink:#2c4straße;
+    --accent-ink:#2b4368;
+    --good:#2f7d5b; --good-soft:#e3f2ea; --good-ink:#1f5c41;
+    --warn:#a8642a; --warn-soft:#f6ecdf; --warn-ink:#7c4715;
+    --plum:#6b4a86; --plum-soft:#efe8f5; --plum-ink:#503468;
+    --radius:10px;
+    --mono:"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#17161a; --surface:#201f24; --surface-2:#26252b; --ink:#eceae6; --ink-2:#b8b3ab;
+      --muted:#8f897f; --line:#302f36; --line-2:#3b3a42;
+      --accent:#8fb0e0; --accent-soft:#22293a; --accent-ink:#bcd0ef;
+      --good:#7cc6a0; --good-soft:#1a2b23; --good-ink:#a6dcc0;
+      --warn:#dba066; --warn-soft:#2e2318; --warn-ink:#e8bf93;
+      --plum:#bfa2db; --plum-soft:#26203040; --plum-soft:#271f31; --plum-ink:#d3bde9;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#17161a; --surface:#201f24; --surface-2:#26252b; --ink:#eceae6; --ink-2:#b8b3ab;
+    --muted:#8f897f; --line:#302f36; --line-2:#3b3a42;
+    --accent:#8fb0e0; --accent-soft:#22293a; --accent-ink:#bcd0ef;
+    --good:#7cc6a0; --good-soft:#1a2b23; --good-ink:#a6dcc0;
+    --warn:#dba066; --warn-soft:#2e2318; --warn-ink:#e8bf93;
+    --plum:#bfa2db; --plum-soft:#271f31; --plum-ink:#d3bde9;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f7; --surface:#ffffff; --surface-2:#f3f1ec; --ink:#1f1d1a; --ink-2:#57534e;
+    --muted:#8a847c; --line:#e5e1da; --line-2:#d8d3ca;
+    --accent:#3f5f8f; --accent-soft:#e9eef6; --accent-ink:#2b4368;
+    --good:#2f7d5b; --good-soft:#e3f2ea; --good-ink:#1f5c41;
+    --warn:#a8642a; --warn-soft:#f6ecdf; --warn-ink:#7c4715;
+    --plum:#6b4a86; --plum-soft:#efe8f5; --plum-ink:#503468;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.6;
+    font-feature-settings:"kern","liga","calt";
+  }
+  .wrap{max-width:940px; margin-inline:auto; padding:48px 24px 96px}
+  header.doc{border-bottom:1px solid var(--line); padding-bottom:28px; margin-bottom:36px}
+  .eyebrow{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700}
+  h1{font-size:2rem; line-height:1.2; margin:.35em 0 .3em; letter-spacing:-.01em}
+  .lede{font-size:1.08rem; color:var(--ink-2); max-width:70ch; margin:.2em 0 0}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:20px}
+  .meta .pill{font-size:12.5px; padding:4px 10px; border-radius:999px; border:1px solid var(--line-2);
+    background:var(--surface-2); color:var(--ink-2)}
+  .meta .pill b{color:var(--ink); font-weight:600}
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin:28px 0 4px}
+  .stat{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px}
+  .stat .n{font-size:1.5rem; font-weight:700; letter-spacing:-.02em}
+  .stat .l{font-size:12.5px; color:var(--muted); margin-top:2px}
+  h2{font-size:1.4rem; margin:52px 0 14px; letter-spacing:-.01em; padding-bottom:8px; border-bottom:1px solid var(--line)}
+  h3{font-size:1.05rem; margin:28px 0 8px}
+  p{max-width:72ch}
+  a{color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  a:hover{border-bottom-color:var(--accent)}
+  code{font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:1px 5px; border-radius:5px; border:1px solid var(--line)}
+  strong{color:inherit; font-weight:650}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}}
+  .panel{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px}
+  .panel h3{margin-top:0}
+  ul.tight{margin:.4em 0; padding-left:1.15em}
+  ul.tight li{margin:.3em 0; max-width:70ch}
+  .lever{display:flex; gap:10px; align-items:baseline; margin:.45em 0}
+  .lever .tag{flex:none; font-size:11px; font-weight:700; font-family:var(--mono); color:var(--good-ink);
+    background:var(--good-soft); border:1px solid color-mix(in srgb,var(--good) 30%,transparent);
+    padding:1px 7px; border-radius:6px; margin-top:2px}
+  .gap .tag{color:var(--warn-ink); background:var(--warn-soft); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+  .axes{list-style:none; padding:0; margin:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px}
+  .axes li{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px}
+  .axes .ax{font-size:11px; font-family:var(--mono); color:var(--accent); font-weight:700; letter-spacing:.06em}
+  .axes .axt{font-weight:650; margin:3px 0 2px}
+  .axes .axd{font-size:13.5px; color:var(--ink-2)}
+  nav.jump{background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); padding:14px 18px; margin:18px 0 8px}
+  nav.jump ol{margin:.2em 0; padding-left:1.3em}
+  nav.jump li{margin:.28em 0}
+  article.idea{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin:22px 0; scroll-margin-top:16px}
+  .idea .head{display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap}
+  .idea .rank{flex:none; font-family:var(--mono); font-weight:700; font-size:14px; color:var(--accent-ink);
+    background:var(--accent-soft); border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);
+    width:30px; height:30px; border-radius:8px; display:grid; place-items:center}
+  .idea h3{margin:0; font-size:1.18rem; flex:1 1 260px}
+  .chips{display:flex; gap:6px; flex-wrap:wrap}
+  .chip{font-size:11.5px; font-weight:600; padding:3px 9px; border-radius:999px; border:1px solid var(--line-2); background:var(--surface-2); color:var(--ink-2); white-space:nowrap}
+  .chip.ax{color:var(--accent-ink); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 28%,transparent)}
+  .chip.hi{color:var(--good-ink); background:var(--good-soft); border-color:color-mix(in srgb,var(--good) 30%,transparent)}
+  .chip.med{color:var(--warn-ink); background:var(--warn-soft); border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+  .idea dl{display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:14px 0 0}
+  .idea dt{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700; padding-top:3px}
+  .idea dd{margin:0; max-width:70ch}
+  .basis{font-size:14.5px}
+  .basis .k{font-family:var(--mono); font-size:12px; font-weight:700; padding:1px 6px; border-radius:5px; margin-right:6px}
+  .basis .direct{color:var(--good-ink); background:var(--good-soft)}
+  .basis .reasoned{color:var(--plum-ink); background:var(--plum-soft)}
+  .basis .external{color:var(--accent-ink); background:var(--accent-soft)}
+  .fig{margin:16px 0 4px; padding:14px; background:var(--surface-2); border:1px solid var(--line); border-radius:10px}
+  .fig svg{display:block; width:100%; height:auto}
+  .fig figcaption{font-size:12.5px; color:var(--muted); margin-top:8px; text-align:center}
+  .keystone{border-color:color-mix(in srgb,var(--accent) 45%,var(--line)); box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 22%,transparent)}
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:14.5px}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+  td .rr{font-family:var(--mono); font-size:12px; color:var(--warn-ink); background:var(--warn-soft); padding:1px 6px; border-radius:5px}
+  .callout{background:var(--plum-soft); border:1px solid color-mix(in srgb,var(--plum) 32%,transparent); border-radius:10px; padding:16px 20px; margin:20px 0}
+  .callout .eyebrow{color:var(--plum)}
+  footer.composition-signal{margin-top:56px; padding-top:18px; border-top:1px solid var(--line); font-size:12.5px; color:var(--muted)}
+  .overflow{overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="eyebrow">Ideation · Compound Engineering</div>
+  <h1>sensei — what to focus on next</h1>
+  <p class="lede">The core learning loop is built and already compounding. This set asks the next question: sensei can <em>propose</em>, but can it <strong>prove it works</strong>, and then act on the proof? Seven ranked directions, each grounded in the code and the ADR trail.</p>
+  <div class="meta">
+    <span class="pill"><b>Date:</b> 2026-07-21</span>
+    <span class="pill"><b>Topic:</b> sensei-next-focus</span>
+    <span class="pill"><b>Focus:</b> what to focus next · levers unlocked</span>
+    <span class="pill"><b>Mode:</b> repo-grounded</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">7</div><div class="l">ranked directions</div></div>
+    <div class="stat"><div class="n">~41</div><div class="l">raw candidates</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">ideation frames</div></div>
+    <div class="stat"><div class="n">5 / 5</div><div class="l">frames converged on #1</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">axes, all covered</div></div>
+  </div>
+</header>
+
+<section id="grounding">
+  <h2>Codebase Context</h2>
+  <p>sensei mines your own Claude Code transcripts for friction — corrections, tool-use denials, interrupts — via a deterministic, zero-token, stdlib-only Python <a href="https://github.com/FlorianRiquelme/sensei/blob/main/mine.py"><code>mine.py</code></a>. A nightly headless LLM stage clusters events and drafts config diffs; a morning <code>/sensei review</code> applies the ones you accept. The loop has grown fast — 16 issues closed, ADRs 0001–0015, and a prior ideation whose ideas already shipped (its Proof-of-Patrol Digest and in-session discovery became <a href="https://github.com/FlorianRiquelme/sensei/issues/16">#16</a>).</p>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3>Levers unlocked</h3>
+      <div class="lever"><span class="tag">LOOP</span><div>Miner → cluster → propose → review/apply, with a headless allowlist enforcing "nightly never edits" (ADR 0001–0005).</div></div>
+      <div class="lever"><span class="tag">MEMORY</span><div>Rejection = a cooldown, not a ban; stable proposal <code>key</code> for dedup (<a href="https://github.com/FlorianRiquelme/sensei/issues/1">#1</a>).</div></div>
+      <div class="lever"><span class="tag">HABITS</span><div><code>repeat</code> event type — mines re-supplied directives with <em>no</em> friction; wide stateless window (<a href="https://github.com/FlorianRiquelme/sensei/issues/9">#9</a>, ADR-0010/0011).</div></div>
+      <div class="lever"><span class="tag">LADDER</span><div>A rule that keeps failing escalates to a <em>proposed hook</em> (<a href="https://github.com/FlorianRiquelme/sensei/issues/10">#10</a>, ADR-0012).</div></div>
+      <div class="lever"><span class="tag">TEACH</span><div>Structured rejection verdicts + mini-grill: rejections now carry a reason (<a href="https://github.com/FlorianRiquelme/sensei/issues/12">#12</a>, ADR-0013).</div></div>
+      <div class="lever"><span class="tag">PROOF</span><div>Deterministic nightly digest + in-session nudge — a missing digest is the failure signal (<a href="https://github.com/FlorianRiquelme/sensei/issues/16">#16</a>, ADR-0014/0015).</div></div>
+      <div class="lever"><span class="tag">SHIP</span><div>Portable copy-install, testable miner, agent docs, triage labels (<a href="https://github.com/FlorianRiquelme/sensei/issues/2">#2</a>, <a href="https://github.com/FlorianRiquelme/sensei/issues/6">#6</a>, ADR-0006/0009).</div></div>
+    </div>
+    <div class="panel">
+      <h3>Open edges (fertile ground)</h3>
+      <div class="lever gap"><span class="tag">GAP</span><div><strong>Effectiveness is only seeded, never proven.</strong> #16 stores each accepted rule's pre-acceptance event count (<code>baseline</code>) — but <em>nothing reads it back</em>. No way to say "5 events → 0. Working," or to retire a rule that didn't.</div></div>
+      <div class="lever gap"><span class="tag">GAP</span><div><strong>Only learns from pain.</strong> Friction + repeats are negative/directive signals. Nothing learns from a smooth session or a skill that fired perfectly.</div></div>
+      <div class="lever gap"><span class="tag">GAP</span><div><strong>Proposal trust is thin.</strong> Config edits ride on LLM diligence — no dry-run, no measured blast radius, no rollback story past <code>git</code>.</div></div>
+      <div class="lever gap"><span class="tag">GAP</span><div><strong>Single-user, single-machine.</strong> "Built for distribution" (ADR-0006) has no adoption mechanic — a colleague starts cold; one person's hard-won rules can't seed another's.</div></div>
+      <div class="lever gap"><span class="tag">GAP</span><div><strong>The ladder tops out at "proposed hook."</strong> ADR-0012 itself asks: is there a rung above? And sub-threshold patterns have no stable identity across nights.</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="axes">
+  <h2>Topic Axes</h2>
+  <ul class="axes">
+    <li><div class="ax">AXIS 1</div><div class="axt">Proof of impact</div><div class="axd">Does an accepted rule actually reduce friction? Track record, retiring what didn't work.</div></li>
+    <li><div class="ax">AXIS 2</div><div class="axt">Signal breadth</div><div class="axd">What sensei learns from — beyond user-side friction and re-supplied directives.</div></li>
+    <li><div class="ax">AXIS 3</div><div class="axt">Proposal quality &amp; trust</div><div class="axd">Precision, verification, and the safety of edits that mutate your config.</div></li>
+    <li><div class="ax">AXIS 4</div><div class="axt">Distribution &amp; adoption</div><div class="axd">Day-one value, onboarding, and compounding across more than one person.</div></li>
+    <li><div class="ax">AXIS 5</div><div class="axt">Autonomy &amp; the human loop</div><div class="axd">Who pulls the trigger, how often, and keeping review a two-minute ritual.</div></li>
+  </ul>
+</section>
+
+<section id="ideas">
+  <h2>Ranked Ideas</h2>
+
+  <div class="fig">
+    <svg viewBox="0 0 900 250" role="img" aria-label="Dependency spine: idea 1 is the keystone that unblocks ideas 5 and 7 and strengthens ideas 2 and 3; a structured-trigger enabler sits underneath.">
+      <defs>
+        <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="arw2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <!-- keystone -->
+      <rect x="330" y="20" width="240" height="56" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"></rect>
+      <text x="450" y="43" text-anchor="middle" font-family="var(--sans)" font-size="14" font-weight="700" fill="var(--ink)">#1 Effectiveness Ledger</text>
+      <text x="450" y="62" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--ink-2)">the keystone — prove rules work</text>
+      <!-- enables row -->
+      <rect x="120" y="140" width="180" height="50" rx="9" fill="var(--surface)" stroke="var(--line-2)"></rect>
+      <text x="210" y="170" text-anchor="middle" font-family="var(--sans)" font-size="13" font-weight="650" fill="var(--ink)">#5 Retirement</text>
+      <rect x="600" y="140" width="180" height="50" rx="9" fill="var(--surface)" stroke="var(--line-2)"></rect>
+      <text x="690" y="170" text-anchor="middle" font-family="var(--sans)" font-size="13" font-weight="650" fill="var(--ink)">#7 Quarantine</text>
+      <rect x="360" y="140" width="180" height="50" rx="9" fill="var(--surface)" stroke="var(--line-2)"></rect>
+      <text x="450" y="164" text-anchor="middle" font-family="var(--sans)" font-size="13" font-weight="650" fill="var(--ink)">#2 Rule Packs</text>
+      <text x="450" y="181" text-anchor="middle" font-family="var(--sans)" font-size="11" fill="var(--muted)">#3 Dry-Run</text>
+      <!-- arrows enable -->
+      <path d="M380,76 C320,110 240,116 210,138" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arw)"></path>
+      <path d="M520,76 C580,110 660,116 690,138" fill="none" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arw)"></path>
+      <path d="M450,76 L450,138" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#arw2)"></path>
+      <text x="286" y="118" text-anchor="middle" font-family="var(--sans)" font-size="11" fill="var(--accent)" paint-order="stroke" stroke="var(--surface-2)" stroke-width="3">enables</text>
+      <text x="614" y="118" text-anchor="middle" font-family="var(--sans)" font-size="11" fill="var(--accent)" paint-order="stroke" stroke="var(--surface-2)" stroke-width="3">enables</text>
+      <text x="500" y="112" text-anchor="middle" font-family="var(--sans)" font-size="11" fill="var(--muted)" paint-order="stroke" stroke="var(--surface-2)" stroke-width="3">strengthens</text>
+      <!-- enabler underneath -->
+      <rect x="300" y="212" width="300" height="30" rx="8" fill="var(--plum-soft)" stroke="var(--plum)" stroke-dasharray="3 3"></rect>
+      <text x="450" y="231" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--plum-ink)">enabler · structured rule triggers make the match exact</text>
+    </svg>
+    <figcaption>The dependency spine — <strong>#1 is the keystone</strong>: measuring effect unblocks retirement (#5) and quarantine (#7) and strengthens sharing (#2) and dry-run (#3). A latent enabler (machine-checkable rule triggers) sits underneath all four.</figcaption>
+  </div>
+
+  <nav class="jump" aria-label="Jump to idea">
+    <ol>
+      <li><a href="#idea-1">The Effectiveness Ledger — consume the <code>baseline</code>, prove each rule worked</a> · Proof · High</li>
+      <li><a href="#idea-2">Portable Rule Packs — export proven rules; ship a starter pack</a> · Distribution · High</li>
+      <li><a href="#idea-3">Counterfactual Dry-Run — show the moments a rule would fire, before you accept</a> · Trust · High</li>
+      <li><a href="#idea-4">Learn from Clean Sessions — a positive signal that vetoes over-broad rules</a> · Signal · Med</li>
+      <li><a href="#idea-5">Rule Retirement via spaced reaffirmation — sensei's missing delete key</a> · Autonomy · Med</li>
+      <li><a href="#idea-6">Recall Leak Counter — make the miner audit its own blind spots</a> · Signal · High</li>
+      <li><a href="#idea-7">Quarantine — the rung above the hook is out of the loop</a> · Autonomy · Med</li>
+    </ol>
+  </nav>
+
+  <!-- IDEA 1 -->
+  <article class="idea keystone" id="idea-1">
+    <div class="head">
+      <div class="rank">1</div>
+      <h3>The Effectiveness Ledger — consume the <code>baseline</code>, prove each rule worked</h3>
+      <div class="chips"><span class="chip ax">Proof of impact</span><span class="chip hi">Conf 85%</span><span class="chip med">Cx Medium</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd>#16 already stores each accepted rule's pre-acceptance event count (<code>baseline</code>), and nothing reads it. Build the deterministic consumer: on every nightly run the miner recomputes each accepted rule's friction rate in the window <em>after</em> its acceptance date in <code>decisions.jsonl</code>, and writes a durable track record. <code>/sensei status</code> then renders one line per rule — <em>"ddev-prefix: 5/wk → 0 since 2026-06-12. Working."</em> vs <em>"still 4/wk. Not working."</em> Pure arithmetic over two artifacts sensei already produces — zero tokens, no new signal source. Each acceptance date is an intervention point; the before/after rate is a legitimate quasi-causal read.</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k direct">direct</span>Grounding + the #16 plan: R10 stores the baseline but "no reporting, no delta math" — it is explicitly a seed with no consumer. <code>decisions.jsonl</code> carries <code>date</code> + <code>key</code> + <code>verdict</code>; the miner is stateless and recomputes over a wide window (ADR-0010). The join is all that's missing.</dd>
+      <dt>Rationale</dt>
+      <dd><strong>This is the keystone.</strong> All five ideation frames independently landed here. Every downstream trust, autonomy, and sharing move is blocked on being able to say "this rule worked" — retirement (#5), quarantine (#7), the provenance in rule packs (#2), and confidence-weighted proposals all depend on it. It converts sensei from "propose and hope" into "propose and grade."</dd>
+      <dt>Downsides</dt>
+      <dd>Depends on the #16 baseline seed shipping first. Matching a rule to "its" future events is fuzzy under the current LLM-semantic clustering — accuracy improves markedly with the structured-trigger enabler (see the callout below the cards). A rule that's quiet <em>because it works</em> must not be misread as ineffective — pair with the clean-session signal (#4).</dd>
+    </dl>
+    <div class="fig">
+      <svg viewBox="0 0 820 170" role="img" aria-label="Before: a rule is accepted and never graded. After: the friction rate is measured before and after the acceptance date and the drop is reported.">
+        <text x="14" y="22" font-family="var(--sans)" font-size="12" font-weight="700" fill="var(--muted)">TODAY</text>
+        <text x="470" y="22" font-family="var(--sans)" font-size="12" font-weight="700" fill="var(--accent)">WITH THE LEDGER</text>
+        <!-- today: flat unknown -->
+        <line x1="20" y1="120" x2="380" y2="120" stroke="var(--line-2)" stroke-width="1"></line>
+        <circle cx="150" cy="120" r="5" fill="var(--warn)"></circle>
+        <text x="150" y="108" text-anchor="middle" font-family="var(--sans)" font-size="11" fill="var(--ink-2)" paint-order="stroke" stroke="var(--surface-2)" stroke-width="3">accept</text>
+        <path d="M40,70 C90,72 120,74 150,120 C185,150 320,150 360,150" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-dasharray="3 3"></path>
+        <text x="200" y="145" font-family="var(--sans)" font-size="11" fill="var(--muted)">then… nobody looks</text>
+        <!-- after: measured drop -->
+        <line x1="450" y1="120" x2="800" y2="120" stroke="var(--line-2)" stroke-width="1"></line>
+        <circle cx="590" cy="120" r="5" fill="var(--accent)"></circle>
+        <text x="590" y="108" text-anchor="middle" font-family="var(--sans)" font-size="11" fill="var(--ink-2)" paint-order="stroke" stroke="var(--surface)" stroke-width="3">accept</text>
+        <path d="M470,60 C520,58 560,60 590,120" fill="none" stroke="var(--warn)" stroke-width="2"></path>
+        <path d="M590,120 C640,150 760,152 795,152" fill="none" stroke="var(--good)" stroke-width="2.4"></path>
+        <text x="505" y="52" font-family="var(--sans)" font-size="11" fill="var(--warn-ink)">5/wk</text>
+        <text x="720" y="146" font-family="var(--sans)" font-size="11" fill="var(--good-ink)">→ 0. Working.</text>
+      </svg>
+      <figcaption>The <code>baseline</code> field already marks the intervention point; the ledger just measures the line on either side of it.</figcaption>
+    </div>
+  </article>
+
+  <!-- IDEA 2 -->
+  <article class="idea" id="idea-2">
+    <div class="head">
+      <div class="rank">2</div>
+      <h3>Portable Rule Packs — export proven rules; ship a starter pack</h3>
+      <div class="chips"><span class="chip ax">Distribution &amp; adoption</span><span class="chip hi">Conf 82%</span><span class="chip med">Cx Medium</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd>A stdlib <code>export</code>/<code>import</code>: bundle accepted rules (rule text + evidence + track record from #1) into one portable file. Import re-enters each rule into the recipient's <code>/sensei review</code> queue <em>as an ordinary proposal</em> — never auto-applied — so nightly-proposes/review-applies (ADR-0002/0005) stays intact. Two payoffs from one format: (a) <strong>team sharing</strong> — one engineer's hard-won CLAUDE.md rules seed a colleague's; (b) <strong>day-one value</strong> — ship a curated maintainer starter pack so a brand-new user's first review isn't an empty screen.</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k direct">direct</span>Grounding names both gaps this bridges: "single-user, single-machine — no way for one person's hard-won rules to seed a colleague's," and "distribution is ready but has no adoption mechanics." ADR-0006 declares sensei "built for distribution"; ADR-0009's copy-not-sync model extends naturally from the tool to the tool's <em>output</em>. Import-as-proposal is the only team model that creates no new apply surface.</dd>
+      <dt>Rationale</dt>
+      <dd>All five distribution-touching frames converged here. sensei's real product isn't the miner — it's the accumulated judgment a long-running instance earns. Today that value is trapped on one machine. A pack turns it into something a team compounds on, with no server and no invariant broken.</dd>
+      <dt>Downsides</dt>
+      <dd>Evidence quotes can carry sensitive transcript text — redaction must be deliberate. A maintainer starter pack introduces opinionated defaults someone has to curate. The "track record" provenance is only meaningful once #1 exists (packs work without it, but weaker).</dd>
+    </dl>
+  </article>
+
+  <!-- IDEA 3 -->
+  <article class="idea" id="idea-3">
+    <div class="head">
+      <div class="rank">3</div>
+      <h3>Counterfactual Dry-Run — show the moments a rule would fire, before you accept</h3>
+      <div class="chips"><span class="chip ax">Proposal quality &amp; trust</span><span class="chip hi">Conf 80%</span><span class="chip med">Cx Medium</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd>At review time, before the accept/reject question, deterministically replay the proposed rule's trigger across the already-mined history and show the concrete past moments it <em>would</em> have changed — each with the verbatim quote and project the miner already captured. A narrow rule matches its seed events and little else; an over-broad rule lights up unrelated moments, so scope creep reveals itself <em>at the decision point</em> instead of degrading the config silently. A zero-token <code>--dry-run</code> for CLAUDE.md edits.</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k reasoned">reasoned</span>Grounding: proposal verification is "thin — no dry-run, no measured confidence." Proposals already carry 2–3 tagged verbatim quotes (<a href="https://github.com/FlorianRiquelme/sensei/blob/main/skill/SKILL.md">SKILL.md</a> step 4, verified), and the events are a deterministic set, so replay costs nothing. The pattern is borrowed from linters and VCS: <code>--fix --dry-run</code>, <code>git rebase --dry-run</code> — good tooling never applies blind, it previews the sites it will touch.</dd>
+      <dt>Rationale</dt>
+      <dd>Converts "sounds reasonable, accept" into an evidence-based click. Showing real historical blast radius is exactly what makes any future auto-apply (deliberately deferred, see rejections) ever thinkable — trust has to become mechanical before autonomy can grow.</dd>
+      <dt>Downsides</dt>
+      <dd>Matching a prose rule to events deterministically is the hard part — the same fuzzy-match issue as #1, strongest when paired with structured triggers. Adds a step to review; mitigate by showing the preview only where a trigger is inferable. A post-apply structural check (duplicate-heading / line-delta sanity) is a cheap companion that belongs in the same build.</dd>
+    </dl>
+  </article>
+
+  <!-- IDEA 4 -->
+  <article class="idea" id="idea-4">
+    <div class="head">
+      <div class="rank">4</div>
+      <h3>Learn from Clean Sessions — a positive signal that vetoes over-broad rules and reinforces what works</h3>
+      <div class="chips"><span class="chip ax">Signal breadth</span><span class="chip med">Conf 65%</span><span class="chip med">Cx Large</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd>Today the miner emits only friction. Add a deterministic positive signal: a session (or the span after a skill/tool fires) with substantial activity and <em>zero</em> friction is a "clean"/"win" event. Nightly uses it two ways — <strong>defensively</strong>, to veto or down-weight a proposal that would constrain behavior clean sessions routinely perform without complaint (kills autoimmune over-broad rules); and <strong>generatively</strong>, to draft positive proposals ("the <code>tdd</code> skill fires and sessions go smooth — sharpen its trigger so it fires earlier").</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k direct">direct</span>Grounding gap, verbatim: "nothing learns from what went well — smooth sessions, a skill that fired perfectly." Confirmed in <a href="https://github.com/FlorianRiquelme/sensei/blob/main/mine.py"><code>mine.py</code></a>: only <code>rtype=="user"</code> becomes an event; assistant/tool activity is stored as context only (line 86). Structurally this mirrors the shipped <code>repeat</code> event (ADR-0011) — a positive twin of an existing mechanism. Analogy: immune self-tolerance (learn "self" so you don't attack healthy tissue) and clinical responder coding.</dd>
+      <dt>Rationale</dt>
+      <dd>sensei's entire worldview is pain; a nervous system that only feels pain eventually over-corrects — proposing fixes for things that already work. This is the cheapest defense against the scariest failure mode (silently making Claude worse) <em>and</em> it roughly doubles the learnable surface, shifting sensei from nag-detector toward coach.</dd>
+      <dt>Downsides</dt>
+      <dd>Highest build cost in the set — a new event type plus reliable skill/tool-invocation detection in the transcript. "Clean" is heuristic: a session can be quiet because the user gave up, so the signal needs guardrails before it's trusted to veto.</dd>
+    </dl>
+    <div class="fig">
+      <svg viewBox="0 0 820 150" role="img" aria-label="Before: the miner senses only pain. After: it senses pain plus clean sessions, giving it a reason to hold back over-broad rules.">
+        <text x="14" y="22" font-family="var(--sans)" font-size="12" font-weight="700" fill="var(--muted)">ONE-SIDED TODAY</text>
+        <circle cx="120" cy="86" r="34" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.5"></circle>
+        <text x="120" y="82" text-anchor="middle" font-family="var(--sans)" font-size="12" font-weight="650" fill="var(--warn-ink)">pain</text>
+        <text x="120" y="99" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--warn-ink)">only</text>
+        <text x="185" y="90" font-family="var(--sans)" font-size="12" fill="var(--ink-2)">→ over-corrects</text>
+        <line x1="410" y1="20" x2="410" y2="132" stroke="var(--line-2)" stroke-dasharray="4 4"></line>
+        <text x="470" y="22" font-family="var(--sans)" font-size="12" font-weight="700" fill="var(--good-ink)">TWO-SIDED</text>
+        <circle cx="560" cy="86" r="34" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.5"></circle>
+        <text x="560" y="90" text-anchor="middle" font-family="var(--sans)" font-size="12" font-weight="650" fill="var(--warn-ink)">pain</text>
+        <circle cx="650" cy="86" r="34" fill="var(--good-soft)" stroke="var(--good)" stroke-width="1.5"></circle>
+        <text x="650" y="82" text-anchor="middle" font-family="var(--sans)" font-size="12" font-weight="650" fill="var(--good-ink)">clean</text>
+        <text x="650" y="99" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--good-ink)">held</text>
+        <text x="712" y="90" font-family="var(--sans)" font-size="12" fill="var(--ink-2)">→ restraint</text>
+      </svg>
+      <figcaption>A veto signal is cheaper and safer than a rollback mechanism bolted on after a bad rule ships.</figcaption>
+    </div>
+  </article>
+
+  <!-- IDEA 5 -->
+  <article class="idea" id="idea-5">
+    <div class="head">
+      <div class="rank">5</div>
+      <h3>Rule Retirement via spaced reaffirmation — sensei's missing delete key</h3>
+      <div class="chips"><span class="chip ax">Autonomy &amp; the human loop</span><span class="chip med">Conf 68%</span><span class="chip med">Cx Medium</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd>sensei only ever adds prose; a self-improving system must also shrink. Once #1 exists, treat each accepted rule like a spaced-repetition card: if its post-acceptance friction stayed gone, the rule "graduates" and its next check-in pushes further out (less attention over time); if friction recurs or the baseline never moved, the interval collapses and nightly drafts a <code>retire:</code> proposal — walked through review like any other, reversible via <code>git</code>. Acceptance becomes provisional with a symmetric "prove-in" window, the mirror of the 30-day rejection cooldown.</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k reasoned">reasoned</span>Grounding: "no way to retire a rule that didn't work." CLAUDE.md loads into <em>every</em> session, so dead rules carry a real context cost against the project's own simplicity ethos. ADR-0012 already establishes that a rule's <em>lifecycle</em> is sensei's business (the escalation ladder) — retirement is the missing downward rung. The expanding-interval schedule is Anki's SM-2 inverted: a well-retained item is shown less, resurfacing only when it slips — which is exactly the "prove it works without nagging" mechanism.</dd>
+      <dt>Rationale</dt>
+      <dd>The first mechanism that lets sensei <em>reverse its own past decisions</em> — what "self-improving" actually requires — and it keeps CLAUDE.md lean instead of growing monotonically into noise. Attention flows only to the rules that are actually slipping.</dd>
+      <dt>Downsides</dt>
+      <dd>Strictly depends on #1. The central false-positive — retiring a rule that's quiet <em>because it works</em> — is precisely what the clean-session signal (#4) guards, so this is strongest built after #4.</dd>
+    </dl>
+  </article>
+
+  <!-- IDEA 6 -->
+  <article class="idea" id="idea-6">
+    <div class="head">
+      <div class="rank">6</div>
+      <h3>Recall Leak Counter — make the miner audit its own blind spots</h3>
+      <div class="chips"><span class="chip ax">Signal breadth</span><span class="chip hi">Conf 88%</span><span class="chip hi">Cx Low</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd><a href="https://github.com/FlorianRiquelme/sensei/blob/main/mine.py"><code>mine.py</code></a> silently discards signal in four places and surfaces none of it: malformed JSONL is swallowed by a bare <code>except: continue</code> (line 68), events past <code>MAX_PER_SESSION</code> are dropped (line 95), the global <code>MAX_TOTAL=400</code> truncates (line 164), and unreadable files are skipped (line 59). Add <code>_meta: {parse_errors, capped_sessions, total_capped, unreadable_files}</code> to <code>events.json</code> and surface it in the nightly digest — "sensei may be missing signal in project X." Small, stdlib, deterministic.</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k direct">direct</span>Verified by reading the file: lines 66–69, 95–96, 164, and 59–60 each drop data with no trace, and the output dict (lines 166–171) carries no such counts. ADR-0004 stakes the whole design on the miner favoring <em>recall</em> — but recall is only a guarantee if you'd notice when it silently fails.</dd>
+      <dt>Rationale</dt>
+      <dd>The miner is the foundation every downstream stage trusts — clustering, and the effectiveness scoring in #1. A corrupted transcript or an unusually long session currently degrades signal invisibly. This is the cheapest possible guard on the project's core premise, and a clean quick win to ship first while the larger directions are scoped.</dd>
+      <dt>Downsides</dt>
+      <dd>Almost none — tiny surface, on-brand. Marginal alarm-fatigue risk if the counts are noisy; mitigate by only surfacing above a threshold.</dd>
+    </dl>
+  </article>
+
+  <!-- IDEA 7 -->
+  <article class="idea" id="idea-7">
+    <div class="head">
+      <div class="rank">7</div>
+      <h3>Quarantine — the rung above the hook is out of the loop, not deeper in it</h3>
+      <div class="chips"><span class="chip ax">Autonomy &amp; the human loop</span><span class="chip med">Conf 62%</span><span class="chip med">Cx Medium</span></div>
+    </div>
+    <dl>
+      <dt>Description</dt>
+      <dd>When a pattern keeps qualifying but its rule <em>and</em> its escalated hook keep failing or getting rejected, stop re-proposing it. Move it to a durable "chronic friction" ledger surfaced once as <em>"this needs a human design decision, not another rule"</em> — a short structured writeup, not a diff. The ladder's top rung becomes escalation <em>out of</em> automation, and those recurring sub-threshold patterns finally get the stable cross-night identity they lack.</dd>
+      <dt>Basis</dt>
+      <dd class="basis"><span class="k reasoned">reasoned</span>Grounding poses this exact open question: "the ladder tops out at 'proposed hook' — is there a rung above? Permissions were scoped out (ADR-0012)," plus "sub-threshold patterns have no stable identity across nights." The pattern is CI flaky-test quarantine: mature CI stops auto-retrying a test it can't settle, isolates it, and reports it for human root-cause. Quarantine respects the permissions scope-out — the terminal move hands the human a question, not autonomy.</dd>
+      <dt>Rationale</dt>
+      <dd>Prevents the single fastest uninstall trigger — sensei re-proposing what you keep rejecting — and names the class of problem that rules genuinely can't fix. It turns nagging into an honesty valve.</dd>
+      <dt>Downsides</dt>
+      <dd>Needs the escalation/hook machinery (ADR-0012) in place first, and "keeps failing" is only objective once the effectiveness read (#1) exists. A narrower variant — escalating to a proposed regression test — fits projects that already have a test suite.</dd>
+    </dl>
+  </article>
+
+  <div class="callout">
+    <div class="eyebrow">Cross-cutting enabler</div>
+    <p style="margin:.4em 0 0"><strong>Structured rule triggers.</strong> Ideas #1, #3, and #5 all hinge on matching a prose rule to "its" events — today a fuzzy, LLM-semantic guess. Letting a proposal optionally carry a small machine-checkable trigger (target glob / tool name / keyword) alongside its prose would make that match <em>exact</em> and give sub-threshold patterns the stable identity #7 needs — the deterministic miner could then measure the effect of prose without the LLM ever entering the measurement loop. It's a substrate, not a standalone direction; worth deciding early because it changes how #1/#3/#5 are built.</p>
+  </div>
+</section>
+
+<section id="rejection-summary">
+  <h2>Rejection Summary</h2>
+  <p>~41 raw candidates across five frames; heavy convergence collapsed them to seven survivors. The strongest cuts were near-misses, not weak ideas — several are natural follow-ons once the keystone lands.</p>
+  <div class="overflow">
+  <table>
+    <thead><tr><th>Idea</th><th>Disposition</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td>Structured rule triggers</td><td><span class="rr">elevated</span></td><td>Foundational substrate for #1/#3/#5 — surfaced as the cross-cutting enabler rather than a standalone focus.</td></tr>
+      <tr><td>Structural conflict / redline lint (new rule vs. existing rules)</td><td><span class="rr">runner-up</span></td><td>Genuinely strong and distinct; pairs with #3's build. Cut for space, not merit.</td></tr>
+      <tr><td>Catch-it-at-the-buzzer (Stop-hook low-latency mining)</td><td><span class="rr">runner-up</span></td><td>Real felt-responsiveness win; some tension with "nightly is the batch authority." Revisit after the core proof loop.</td></tr>
+      <tr><td>Cross-project frequency → global-vs-project placement</td><td><span class="rr">runner-up</span></td><td>Sharp, cheap placement-quality idea; more tactical than the strategic set. Good brainstorm candidate.</td></tr>
+      <tr><td>Self-caught signal (mine assistant self-corrections)</td><td><span class="rr">runner-up</span></td><td>Distinct signal class; overlaps the signal-breadth slot #4 already fills.</td></tr>
+      <tr><td>Learn from how you review (decisions.jsonl as taste signal)</td><td><span class="rr">runner-up</span></td><td>Promising, but a follow-on once #1 makes review outcomes measurable.</td></tr>
+      <tr><td>Tiered autonomy / auto-apply the "safe" subset</td><td><span class="rr">rejected</span></td><td>Touches the ADR-0002 "review applies" invariant; premature until #3 makes "safe" provable. Better as a later brainstorm.</td></tr>
+      <tr><td>Deterministic apply-time linter (duplicate headings, line-delta)</td><td><span class="rr">folded</span></td><td>A cheap companion inside #3's build, not a standalone direction.</td></tr>
+      <tr><td>Cumulative regression corpus (compare vs. everything ever decided)</td><td><span class="rr">folded</span></td><td>A heavier version of conflict-lint; overlaps it.</td></tr>
+      <tr><td>Self-pruning / proposal-decay (prune stale <em>pending</em> proposals)</td><td><span class="rr">runner-up</span></td><td>Cheap review-hygiene win; lost the autonomy slot to Quarantine (#7) but worth a fast follow.</td></tr>
+      <tr><td>Cross-machine signal merge (glob a synced dir)</td><td><span class="rr">rejected</span></td><td>Niche (multi-Mac single user); partly subsumed by rule packs (#2).</td></tr>
+      <tr><td>Self-selecting mode (infer nightly vs. review)</td><td><span class="rr">rejected</span></td><td>A clean quick fix, but too small to be a strategic "focus" — fails the meeting-test at this altitude.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<footer class="composition-signal">
+  Composed 2026-07-21 by ce-ideate from the sensei repo (main + in-flight branches) and prior ideation <code>docs/ideation/2026-07-18-sensei-perceived-usefulness-ideation.html</code>. Five ideation frames, ~41 raw candidates; direct bases verified against <code>mine.py</code> and <code>skill/SKILL.md</code>.
+</footer>
+
+</div>
+<script>
+  // anchor-permalink smooth scroll only; no framework runtime
+  document.querySelectorAll('nav.jump a, .callout a').forEach(function(a){
+    a.addEventListener('click', function(e){
+      var id = a.getAttribute('href');
+      if(id && id.charAt(0)==='#'){ var t=document.querySelector(id); if(t){ e.preventDefault(); t.scrollIntoView({behavior:'smooth',block:'start'}); history.replaceState(null,'',id);} }
+    });
+  });
+</script>
+</body>
+</html>

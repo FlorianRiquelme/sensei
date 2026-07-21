@@ -50,6 +50,12 @@ This repo follows a compound-engineering (CE) lifecycle. A feature moves through
 4. `/goal` — implement a work unit.
 5. `/ce-code-review` — review the implementation.
 
+### Milestones & versioning
+
+- **Roadmap anchor:** `STRATEGY.md` (repo root) holds the investment tracks and the scope firewall. Maintain it with `/ce-strategy`; `/ce-ideate`, `/ce-brainstorm`, and `/ce-plan` read it as grounding.
+- **One version = one track's sentence.** Versions are tracked as GitHub Milestones, not branches. A new idea, however good, is triaged into a *later* milestone, never pulled into the current one. That is where scope creep is fought.
+- **Milestones group issues, not branches.** No long-lived milestone/integration branch: each feature branch and each bug fix merges to `main` independently (see Branching), so `main` stays shippable. A version "ships" when its milestone's issues are all merged; tag it then.
+
 ### Stage handoffs
 
 When a stage finishes, proactively copy a kickoff prompt for the **next** stage into the clipboard (`pbcopy`) so a fresh session can start immediately without being asked. The prompt's first line is the next skill's slash command; the body carries the context that session needs — the **repo-relative path to the plan doc** under `docs/plans/` (always include it: every stage after brainstorm operates on that one file, and the fresh session cannot reliably find it otherwise), the branch, the reading order, and the task. The chain is fixed — ideate/brainstorm → `/grill-with-docs` → `/ce-plan` → `/goal` → `/ce-code-review` — so each session already knows what comes next (e.g. finishing `/grill-with-docs` copies a `/ce-plan` prompt that names the plan file).

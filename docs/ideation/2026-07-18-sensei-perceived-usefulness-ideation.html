@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: What sensei must provide to feel useful</title>
+<style>
+:root{
+  --bg:#faf9f7; --card:#ffffff; --ink:#1f2430; --muted:#5c6270;
+  --line:#e3e0da; --accent:#0f766e; --accent-soft:#e6f2f0; --accent-text:#0b5d56;
+  --warn-soft:#fdf0e3; --warn-text:#92510e; --danger-soft:#fbe9e9; --danger-text:#9a2f2f;
+  --chip-bg:#eef1f4; --code-bg:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#15171c; --card:#1d2027; --ink:#e6e4de; --muted:#9aa0ab;
+    --line:#31353e; --accent:#3fb6ab; --accent-soft:#15332f; --accent-text:#6fd3c9;
+    --warn-soft:#38290f; --warn-text:#e0a75e; --danger-soft:#3a1d1d; --danger-text:#e08b8b;
+    --chip-bg:#272b33; --code-bg:#262a31;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+main{max-width:900px;margin:0 auto;padding:2.5rem 1.5rem 4rem}
+h1{font-size:1.7rem;line-height:1.25;margin:.2rem 0 .4rem}
+h2{font-size:1.25rem;margin:2.6rem 0 .8rem;padding-top:1rem;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:0 0 .5rem}
+p{max-width:70ch}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;font-size:.86em;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+a{color:var(--accent-text)}
+.eyebrow{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-text);font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:.4rem .6rem;margin:.7rem 0 0;padding:0;list-style:none}
+.meta li{background:var(--chip-bg);border-radius:999px;padding:.15rem .7rem;font-size:.8rem;color:var(--muted)}
+.meta li b{color:var(--ink);font-weight:600}
+.stats{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.4rem 0 0}
+.stats div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.6rem 1rem;min-width:7.5rem}
+.stats .n{font-size:1.35rem;font-weight:700;color:var(--accent-text)}
+.stats .l{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.axes{margin:.4rem 0 0;padding-left:1.2rem}
+.axes li{margin:.25rem 0;max-width:75ch}
+.jump{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.8rem 1.1rem;margin:1rem 0 1.6rem}
+.jump ol{margin:.3rem 0 0;padding-left:1.3rem}
+.jump li{margin:.2rem 0}
+article.idea{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:1.2rem 1.4rem;margin:1.2rem 0}
+.idea-head{display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;margin-bottom:.3rem}
+.rank{background:var(--accent-soft);color:var(--accent-text);font-weight:700;border-radius:8px;
+  padding:.1rem .55rem;font-size:.95rem}
+.badges{display:flex;gap:.4rem;flex-wrap:wrap;margin:.3rem 0 .8rem}
+.badges span{background:var(--chip-bg);color:var(--muted);border-radius:999px;padding:.1rem .6rem;font-size:.74rem}
+.badges span b{color:var(--ink)}
+dl.fields{margin:.6rem 0 0}
+dl.fields dt{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-weight:700;margin-top:.75rem}
+dl.fields dd{margin:.15rem 0 0;max-width:75ch}
+figure{margin:1.1rem 0 .3rem;padding:.8rem;border:1px dashed var(--line);border-radius:10px;overflow-x:auto}
+figcaption{font-size:.78rem;color:var(--muted);margin-top:.4rem}
+svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+table{border-collapse:collapse;width:100%;margin:.8rem 0;font-size:.88rem}
+th,td{border:1px solid var(--line);padding:.45rem .65rem;text-align:left;vertical-align:top}
+th{background:var(--chip-bg);font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}
+td.refuted{color:var(--danger-text);font-weight:600}
+.callout{background:var(--warn-soft);border-radius:10px;padding:.7rem 1rem;margin:.9rem 0;max-width:78ch}
+.callout .tag{color:var(--warn-text);font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+footer.composition-signal{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);
+  font-size:.78rem;color:var(--muted)}
+/* SVG shared */
+.box{fill:var(--card);stroke:var(--muted);stroke-width:1.2;rx:8}
+.boxa{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.2}
+.boxw{fill:var(--warn-soft);stroke:var(--warn-text);stroke-width:1.2}
+.lbl{fill:var(--ink);font-size:12px}
+.lbls{fill:var(--muted);font-size:11px}
+.lbla{fill:var(--accent-text);font-size:12px;font-weight:600}
+.arrow{stroke:var(--muted);stroke-width:1.4;fill:none;marker-end:url(#arr)}
+.arrowa{stroke:var(--accent);stroke-width:1.6;fill:none;marker-end:url(#arra)}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+<div class="eyebrow">Ideation &middot; ce-ideate</div>
+<h1>What must sensei provide for people to feel it&rsquo;s useful?</h1>
+<ul class="meta">
+  <li><b>date</b> 2026-07-18</li>
+  <li><b>topic</b> sensei-perceived-usefulness</li>
+  <li><b>focus</b> what do we need to provide for people to feel like sensei is useful?</li>
+  <li><b>mode</b> repo-grounded</li>
+</ul>
+<div class="stats">
+  <div><div class="n">47</div><div class="l">raw ideas</div></div>
+  <div><div class="n">26+5</div><div class="l">deduped + syntheses</div></div>
+  <div><div class="n">7</div><div class="l">survivors</div></div>
+  <div><div class="n">5/5</div><div class="l">axes covered</div></div>
+</div>
+</header>
+
+<section id="grounding-context">
+<h2>Grounding Context</h2>
+<p><strong>Codebase context.</strong> sensei is a nightly macOS launchd agent: a deterministic, stdlib-only miner (<code>mine.py</code>) reads Claude Code transcripts and emits friction events (corrections, tool denials, interrupts); a skill clusters them headlessly at 05:30 (<code>/sensei nightly</code>, which writes proposals only and physically cannot edit config) and an interactive morning mode (<code>/sensei review</code>) applies what the user accepts. Rejections get a 30-day cooldown under a stable dedup key. Trust is architectural (ADRs 0001/0002/0005: deterministic miner, nightly-proposes-review-applies, allowlist enforcement); the miner favors recall and the LLM owns precision (ADR-0004); the project is explicitly built for distribution (ADR-0006).</p>
+<p><strong>The gap the grounding surfaced.</strong> Steady-state feedback loops are well designed (issues #9, #10, #12, #13 extend them), but everything the user actually <em>sees</em> is thin: day one is silent by construction (<code>--days 1</code> window plus a &ge;2-session threshold), a zero-proposal morning is indistinguishable from a silently failed run (the launchd <code>&amp;&amp;</code> chain aborts without notification), accepted rules leave no visible track record, and discovery of new proposals rests entirely on an ephemeral 05:30 notification. Detection is engineered; <em>perceived</em> value is not.</p>
+<p><strong>External context.</strong> Near-identical prior art exists (agent-improvement-loop, claude-improve, agent-retro, LearnSkill); the convergent lessons: concrete evidence per proposal, promote existing rules before creating new ones, separate durable lessons from one-offs. sensei&rsquo;s rejection cooldown is a differentiator none of them implement. Dependabot studies show advisory bots die of notification fatigue, not miss rate. The Copilot trust-calibration research names three failure modes to design against: abandon, verify-everything, blindly-accept. Habit research (Fogg): the morning ritual must cost ~1&ndash;2 minutes, and silence reads as a dead product. Evidence dossiers from five axis scouts live under <code>/tmp/compound-engineering/ce-ideate/a7f3c2d1/</code>.</p>
+</section>
+
+<section id="topic-axes">
+<h2>Topic Axes</h2>
+<ol class="axes">
+<li><strong>first-run-cold-start</strong>: install experience, day-1 emptiness, latency to first proposal, expectation setting</li>
+<li><strong>proposal-quality</strong>: thresholds, signal-to-noise, evidence grounding in proposals</li>
+<li><strong>visible-payoff</strong>: impact of accepted rules, friction trend, status introspection, track record</li>
+<li><strong>morning-review</strong>: review UX, triage cost, discovery/notification of new proposals</li>
+<li><strong>trust-auditability</strong>: human-readable events, safety guarantees made visible, spot-checking</li>
+</ol>
+</section>
+
+<section id="ranked-ideas">
+<h2>Ranked Ideas</h2>
+<nav class="jump"><strong>Jump to:</strong>
+<ol>
+<li><a href="#idea-1">The Founding Report: install-time backfill</a></li>
+<li><a href="#idea-2">Proof-of-Patrol Digest: the quiet morning proves the patrol</a></li>
+<li><a href="#idea-3">Track-Record Spine: stamps, receipts, status</a></li>
+<li><a href="#idea-4">Two-Minute Morning: consent-agenda review + in-session discovery</a></li>
+<li><a href="#idea-5">Exercisable Trust: <code>sensei why</code>, loud failure, versioned contract</a></li>
+<li><a href="#idea-6">Deterministic Quality Floor: backtest scores + pre-LLM dedup</a></li>
+<li><a href="#idea-7">Speak My Language: lexicon packs + gap self-check</a></li>
+</ol>
+</nav>
+
+<article class="idea" id="idea-1">
+<div class="idea-head"><span class="rank">1</span><h3>The Founding Report: install-time backfill over full history</h3></div>
+<div class="badges"><span>axis <b>first-run-cold-start</b></span><span>confidence <b>85%</b></span><span>complexity <b>Low</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>Make <code>install.sh</code> end with sensei&rsquo;s first real output, not a promise: run <code>mine.py --days 0</code> (or a ~30-day window) over the transcript history that already exists, kick off one headless nightly pass, and print &ldquo;Founding report ready&rdquo; with the proposals path. Fold in the transparency demo: show the events summary (&ldquo;scanned 41 sessions, 87 events across 6 projects&rdquo;) and point at <code>events.json</code>: &ldquo;open it; this is everything sensei will ever show the LLM.&rdquo; The realistic install base is existing Claude Code users, so the richest corpus sensei will ever see is sitting there at install time and is currently thrown away.</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> <code>install.sh:31</code> ends with only <em>&ldquo;sensei: installed. Runs daily 05:30 via launchd&hellip;&rdquo;</em>; <code>mine.py:9</code> documents <code>--days 0&nbsp;&nbsp;# all time</code> yet nothing in the shipped flow ever invokes it; the plist runs <code>--days 1</code>, so the first scheduled run scans a near-empty window. Verified by the Phase 3 spot-check. Five ideation frames independently converged on this, the strongest convergence in the run.</dd>
+<dt>Rationale</dt>
+<dd>Day-1 silence is not bad luck; it is a deterministic side effect of a steady-state window default that was never special-cased for install day. The first minutes after install are where &ldquo;is this useful?&rdquo; is decided, and the capability to answer it already ships as an unused flag. This converts &ldquo;trust me, wait a day&rdquo; into &ldquo;look what it already found in <em>your</em> history.&rdquo;</dd>
+<dt>Downsides</dt>
+<dd>Install now spends Claude tokens on an unrequested run and takes minutes instead of seconds; window size needs a decision (all-time may over-surface stale friction; 30 days is a safer default); running <code>claude -p</code> from an installer needs a clean failure path when the CLI isn&rsquo;t authenticated.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 780 190" role="img" aria-label="Before and after install timeline">
+<defs>
+<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker>
+<marker id="arra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker>
+</defs>
+<text x="10" y="24" class="lbls">TODAY</text>
+<rect x="10" y="34" width="120" height="40" class="box" rx="8"/><text x="70" y="58" class="lbl" text-anchor="middle">install.sh</text>
+<line x1="130" y1="54" x2="230" y2="54" class="arrow"/><text x="180" y="46" class="lbls" text-anchor="middle">~24 h silence</text>
+<rect x="230" y="34" width="170" height="40" class="box" rx="8"/><text x="315" y="52" class="lbl" text-anchor="middle">05:30 scan</text><text x="315" y="67" class="lbls" text-anchor="middle">--days 1 &rarr; ~0 events</text>
+<line x1="400" y1="54" x2="490" y2="54" class="arrow"/>
+<rect x="490" y="34" width="180" height="40" class="boxw" rx="8"/><text x="580" y="52" class="lbl" text-anchor="middle">&ldquo;0 proposals&rdquo;</text><text x="580" y="67" class="lbls" text-anchor="middle">reads as broken</text>
+<text x="10" y="124" class="lbls">FOUNDING REPORT</text>
+<rect x="10" y="134" width="120" height="40" class="box" rx="8"/><text x="70" y="158" class="lbl" text-anchor="middle">install.sh</text>
+<line x1="130" y1="154" x2="230" y2="154" class="arrowa"/><text x="180" y="146" class="lbla" text-anchor="middle">minutes</text>
+<rect x="230" y="134" width="170" height="40" class="boxa" rx="8"/><text x="315" y="152" class="lbl" text-anchor="middle">mine --days 0</text><text x="315" y="167" class="lbls" text-anchor="middle">weeks of real history</text>
+<line x1="400" y1="154" x2="490" y2="154" class="arrowa"/>
+<rect x="490" y="134" width="180" height="40" class="boxa" rx="8"/><text x="580" y="152" class="lbl" text-anchor="middle">first proposals</text><text x="580" y="167" class="lbls" text-anchor="middle">+ &ldquo;here&rsquo;s what I see&rdquo;</text>
+</svg>
+<figcaption>The backfill flag already ships; install just never calls it.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-2">
+<div class="idea-head"><span class="rank">2</span><h3>Proof-of-Patrol Digest: the quiet morning proves the patrol happened</h3></div>
+<div class="badges"><span>axis <b>visible-payoff</b></span><span>confidence <b>80%</b></span><span>complexity <b>Medium</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>Reframe the daily artifact: it is always a friction digest (sessions scanned, events by type and project, patterns brewing below threshold, accepted rules with no recurrence), and proposals are one section that is sometimes empty. The notification always carries the payload (&ldquo;scanned 6 sessions, 14 events, 0 proposals; 3 rules holding&rdquo;), never a bare &ldquo;0 proposals.&rdquo; The miner emits the deterministic baseline digest <em>before</em> the LLM stage runs, so even a silently aborted <code>&amp;&amp;</code> chain leaves a dated artifact; a missing stamp is itself the failure signal (the night-watchman&rsquo;s watchclock: an uneventful night must be distinguishable from a guard who slept).</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> <code>skill/SKILL.md:74-77</code>: zero-pattern nights write a one-line file and notify <em>&ldquo;N proposals&rdquo;</em> with N often 0 (verified). <code>external:</code> habit research in the grounding (&ldquo;&lsquo;0 proposals today&rsquo; silence reads as dead product; always surface something&rdquo;) and morning-digest products: the ritual is the product.</dd>
+<dt>Rationale</dt>
+<dd>Most mornings of a well-tuned sensei are zero-proposal mornings (that is the <em>success</em> state), so the zero-morning surface is the most-seen surface of the product and currently the weakest. It also cannot distinguish health from silent failure today. One reframe fixes the highest-frequency touchpoint and the worst trust hole at once.</dd>
+<dt>Downsides</dt>
+<dd>Moving digest generation into the miner redraws the miner/LLM responsibility line from ADR-0001 (the miner would now write a human-facing artifact, not just events); a daily digest nobody reads can itself become notification noise if it isn&rsquo;t glanceable.</dd>
+</dl>
+</article>
+
+<article class="idea" id="idea-3">
+<div class="idea-head"><span class="rank">3</span><h3>Track-Record Spine: provenance stamps, friction receipts, <code>/sensei status</code></h3></div>
+<div class="badges"><span>axis <b>visible-payoff &middot; trust-auditability</b></span><span>confidence <b>75%</b></span><span>complexity <b>Medium</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>One ledger-aggregation build powering three visible features. (a)&nbsp;<strong>Plant tags:</strong> review stamps every applied rule with provenance (<code>&lt;!-- sensei:2026-07-18 key=&hellip; --&gt;</code>), making &ldquo;which config came from sensei, and which accepted decisions still survive in config&rdquo; greppable in both directions. (b)&nbsp;<strong>Friction receipts:</strong> at accept time, store the pattern&rsquo;s pre-acceptance event count in <code>decisions.jsonl</code> (one integer of new state); after the ~14-day grace, report the delta: &ldquo;Rule &lsquo;ddev-prefix-artisan&rsquo;: 5 events &rarr; 0. Working.&rdquo; (c)&nbsp;<strong><code>/sensei status</code>:</strong> one screen showing last run and outcome, the allowlist actually in force, event/proposal/decision counts, acceptance ratio, and active cooldowns. The same primitive feeds issue #10&rsquo;s escalation check.</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> ADR-0012 (proposed) names the honest signal itself (<em>&ldquo;the honest signal would be &lsquo;friction rate didn&rsquo;t drop,&rsquo; but that needs a stored pre-acceptance rate to compare against &mdash; new state&rdquo;</em>) and declines it; <code>SKILL.md:24</code>&rsquo;s decisions ledger already holds every verdict with a date, used today only for cooldown lookups; <code>SKILL.md:92-93</code> applies rule text with no attribution. Verifier caveat honored: the dedup key exists only post-drafting, so receipts track <em>accepted proposals</em>, not arbitrary sub-threshold patterns.</dd>
+<dt>Rationale</dt>
+<dd>&ldquo;Did sensei ever actually help?&rdquo; is the retention question, and today the only answer is the user&rsquo;s memory. Receipts are the one mechanism in the whole candidate set that lets sensei say <em>&ldquo;this rule worked&rdquo;</em> with a number; stamps make that computable and make every sensei-authored line individually attributable and revertable; status is where all of it becomes visible on demand.</dd>
+<dt>Downsides</dt>
+<dd>Stamps in user-owned files are a boundary the ADRs haven&rsquo;t ruled on, and they can drift stale when a human hand-edits the rule; receipts add the first cross-run state beyond the ledger; a track record that shows mostly &ldquo;no change&rdquo; could undercut rather than build confidence.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 780 210" role="img" aria-label="One aggregation primitive feeding three surfaces">
+<rect x="10" y="30" width="180" height="44" class="box" rx="8"/><text x="100" y="49" class="lbl" text-anchor="middle">plant-tag stamps</text><text x="100" y="64" class="lbls" text-anchor="middle">in applied config</text>
+<rect x="10" y="130" width="180" height="44" class="box" rx="8"/><text x="100" y="149" class="lbl" text-anchor="middle">receipt baseline</text><text x="100" y="164" class="lbls" text-anchor="middle">count at accept time</text>
+<rect x="290" y="78" width="200" height="52" class="boxa" rx="8"/><text x="390" y="99" class="lbl" text-anchor="middle">ledger aggregation</text><text x="390" y="115" class="lbls" text-anchor="middle">decisions.jsonl + events.json</text>
+<line x1="190" y1="52" x2="288" y2="90" class="arrow"/>
+<line x1="190" y1="152" x2="288" y2="116" class="arrow"/>
+<rect x="590" y="14" width="180" height="40" class="box" rx="8"/><text x="680" y="38" class="lbl" text-anchor="middle">/sensei status</text>
+<rect x="590" y="84" width="180" height="40" class="box" rx="8"/><text x="680" y="101" class="lbl" text-anchor="middle">morning receipts</text><text x="680" y="116" class="lbls" text-anchor="middle">&ldquo;5 events &rarr; 0&rdquo;</text>
+<rect x="590" y="154" width="180" height="40" class="box" rx="8"/><text x="680" y="171" class="lbl" text-anchor="middle">issue #10 escalation</text><text x="680" y="186" class="lbls" text-anchor="middle">rule &rarr; hook check</text>
+<line x1="490" y1="90" x2="588" y2="38" class="arrowa"/>
+<line x1="490" y1="104" x2="588" y2="104" class="arrowa"/>
+<line x1="490" y1="118" x2="588" y2="170" class="arrowa"/>
+</svg>
+<figcaption>Build the aggregation once; three user-visible surfaces and one roadmap item consume it.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-4">
+<div class="idea-head"><span class="rank">4</span><h3>Two-Minute Morning: consent-agenda review + in-session discovery</h3></div>
+<div class="badges"><span>axis <b>morning-review</b></span><span>confidence <b>75%</b></span><span>complexity <b>Medium</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>Two changes to the ritual. <strong>Consent agenda:</strong> review opens with a one-line-per-proposal docket (title, target file, strongest quote); the user gives a batch verdict (&ldquo;accept all except #3; let&rsquo;s talk about #3&rdquo;) and only pulled items get the full one-at-a-time walkthrough. Extension once trust accrues: proposal classes with N consecutive accepts get offered as one-keystroke batch consent (still human-gated; the ADR-0002 bright line holds). <strong>In-session discovery:</strong> a SessionStart hook prints &ldquo;sensei: 3 proposals waiting (oldest 2 days), run <code>/sensei review</code>&rdquo; the next time the user opens Claude Code, anchoring discovery to where review actually happens instead of a 05:30 notification that evaporates before breakfast.</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> <code>skill/SKILL.md:87-91</code>: <em>&ldquo;Walk proposals one at a time&hellip; Ask: accept / reject / edit?&rdquo;</em> (verified); the plist&rsquo;s 05:30 osascript notification is the only discovery surface. <code>external:</code> Fogg habit research (the ritual must cost ~1&ndash;2 minutes) and the approval-queue pattern&rsquo;s demotion ladder (N consecutive approvals &rarr; lighter review).</dd>
+<dt>Rationale</dt>
+<dd>Serial walkthrough cost scales linearly with proposal count, so good weeks, when sensei finds the most, punish the user hardest, exactly when the habit should be reinforced. And an undiscovered proposal is indistinguishable from a dead tool. &ldquo;Review over coffee&rdquo; is the product&rsquo;s own promise (README); this is what keeps that promise at volume.</dd>
+<dt>Downsides</dt>
+<dd>Batch consent trades scrutiny for speed; it needs an explicit answer to whether one keystroke over three items still satisfies &ldquo;the human accepted each one.&rdquo; A SessionStart hook adds an install surface and must never nag (once per day at most). There is tension with issue #12&rsquo;s mini-grill, which adds turns to the same interaction this idea is shrinking.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 780 120" role="img" aria-label="Morning flow from digest to batch verdict">
+<rect x="10" y="40" width="140" height="44" class="box" rx="8"/><text x="80" y="59" class="lbl" text-anchor="middle">05:30 digest</text><text x="80" y="74" class="lbls" text-anchor="middle">written silently</text>
+<line x1="150" y1="62" x2="216" y2="62" class="arrow"/>
+<rect x="218" y="40" width="160" height="44" class="boxa" rx="8"/><text x="298" y="59" class="lbl" text-anchor="middle">SessionStart nudge</text><text x="298" y="74" class="lbls" text-anchor="middle">&ldquo;3 waiting &middot; review&rdquo;</text>
+<line x1="378" y1="62" x2="444" y2="62" class="arrow"/>
+<rect x="446" y="40" width="150" height="44" class="box" rx="8"/><text x="521" y="59" class="lbl" text-anchor="middle">one-line docket</text><text x="521" y="74" class="lbls" text-anchor="middle">scan in seconds</text>
+<line x1="596" y1="62" x2="662" y2="62" class="arrow"/>
+<rect x="664" y="40" width="106" height="44" class="box" rx="8"/><text x="717" y="59" class="lbl" text-anchor="middle">batch verdict</text><text x="717" y="74" class="lbls" text-anchor="middle">pull #3 to discuss</text>
+</svg>
+<figcaption>Cheap judgment first, expensive deliberation only where pulled: the decision-queue pattern.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-5">
+<div class="idea-head"><span class="rank">5</span><h3>Exercisable Trust: <code>sensei why</code>, loud failure, versioned contract</h3></div>
+<div class="badges"><span>axis <b>trust-auditability</b></span><span>confidence <b>70%</b></span><span>complexity <b>Medium</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>Turn &ldquo;trust as architecture&rdquo; into something the user can exercise. <strong><code>sensei why &lt;key&gt;</code></strong> (or <code>mine.py --trace</code>): one command walks a proposal from its quoted evidence to the decision history, the underlying events (timestamp, project, session), and the exact transcript file each quote came from. That is a ten-second spot-check instead of grepping JSONL by hand, and the honest defense against the one real gap in the evidence chain: the LLM stage <em>copies</em> quotes into proposals and could paraphrase or hallucinate one. Plus: a <code>||</code> failure branch in the plist chain so a broken run fires a distinct &ldquo;nightly FAILED&rdquo; notification (broken must never look like quiet), and a <code>schema_version</code> field on <code>events.json</code>/<code>decisions.jsonl</code> before distribution creates independent readers of those files.</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> every mined event already carries <code>ts</code>/<code>project</code>/<code>session</code> (verified in <code>mine.py</code>); the join to transcripts is mechanical, just unexposed. <code>sh.sensei.plist.template:20-21</code>&rsquo;s <code>&amp;&amp;</code> chain aborts silently on miner failure (verified). <code>external:</code> Copilot trust-calibration research: verification overhead is what erodes trust; cheap spot-checks are the fix for the verify-everything failure mode.</dd>
+<dt>Rationale</dt>
+<dd>Verbatim quotes are trust <em>claims</em>; a working provenance trace is trust <em>verification</em>. The first fabricated-looking quote a user can&rsquo;t trace is the last proposal they&rsquo;ll believe. And for a tool that reads private transcripts, being able to exercise the guarantees daily is what moves a new user from verify-everything to spot-check-occasionally.</dd>
+<dt>Downsides</dt>
+<dd>Mostly interface work but spans three small pieces; traceback needs quote-fragment matching against large JSONL trees to stay fast; schema versioning is invisible until a second reader exists (it earns its place here only bundled with the visible pieces).</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 780 110" role="img" aria-label="Traceback chain from proposal quote to transcript line">
+<rect x="10" y="34" width="150" height="44" class="boxa" rx="8"/><text x="85" y="53" class="lbl" text-anchor="middle">proposal quote</text><text x="85" y="68" class="lbls" text-anchor="middle">&ldquo;did I say that?&rdquo;</text>
+<line x1="160" y1="56" x2="212" y2="56" class="arrowa"/><text x="186" y="46" class="lbla" text-anchor="middle">why</text>
+<rect x="214" y="34" width="150" height="44" class="box" rx="8"/><text x="289" y="53" class="lbl" text-anchor="middle">decision history</text><text x="289" y="68" class="lbls" text-anchor="middle">verdicts + cooldown</text>
+<line x1="364" y1="56" x2="416" y2="56" class="arrow"/>
+<rect x="418" y="34" width="150" height="44" class="box" rx="8"/><text x="493" y="53" class="lbl" text-anchor="middle">event record</text><text x="493" y="68" class="lbls" text-anchor="middle">ts &middot; project &middot; session</text>
+<line x1="568" y1="56" x2="620" y2="56" class="arrow"/>
+<rect x="622" y="34" width="148" height="44" class="box" rx="8"/><text x="696" y="53" class="lbl" text-anchor="middle">transcript line</text><text x="696" y="68" class="lbls" text-anchor="middle">the primary source</text>
+</svg>
+<figcaption>Every hop already exists in the data; the command just exposes the join.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-6">
+<div class="idea-head"><span class="rank">6</span><h3>Deterministic Quality Floor: backtest scores + pre-LLM duplicate suppression</h3></div>
+<div class="badges"><span>axis <b>proposal-quality</b></span><span>confidence <b>60%</b></span><span>complexity <b>Medium</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>Push two quality guards into the free, auditable, deterministic layer so perceived quality stops swinging with LLM variance. <strong>Backtest coverage:</strong> every proposal gets a deterministic score (&ldquo;this rule would have addressed 7 events across 4 sessions in the last 30 days&rdquo;), computed by re-scanning the wide-window events; proposals below a coverage floor are demoted to an appendix, and the number doubles as a triage signal in review. <strong>Duplicate suppression:</strong> a cheap deterministic pass greps the target file for near-matches of a candidate&rsquo;s key/slug before the LLM drafts, killing the &ldquo;proposed the same rule twice&rdquo; failure outright instead of re-judging it non-deterministically every night.</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> <code>SKILL.md:68-70</code>: evidence today is 2&ndash;3 verbatim quotes, proof of <em>existence</em> rather than magnitude; <code>SKILL.md:59-61</code>: non-duplication is an LLM judgment call made fresh every run (both verified). <code>external:</code> Dependabot studies: low-value churn, not miss rate, is what gets advisory bots deprecated.</dd>
+<dt>Rationale</dt>
+<dd>Users judge sensei by its worst proposal, not its best. This extends the project&rsquo;s own founding split (ADR-0001/0004: miner owns reliability, LLM owns judgment) onto the quality axis; the checkable failure modes move to the layer that can&rsquo;t hallucinate. The verifier rated this the most architecturally-grounded synthesis in the set.</dd>
+<dt>Downsides</dt>
+<dd>A coverage threshold is a new tunable that can wrongly bury a high-severity single event (the existing high-severity path must bypass it); slug-based near-matching in config files will have false positives/negatives at the margins; introduces quantitative machinery into a deliberately simple pipeline.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 780 150" role="img" aria-label="Two-layer split of responsibilities">
+<rect x="60" y="14" width="660" height="50" class="box" rx="8"/>
+<text x="390" y="35" class="lbl" text-anchor="middle">LLM layer: judgment</text>
+<text x="390" y="52" class="lbls" text-anchor="middle">semantic clustering &middot; root cause &middot; drafting the diff</text>
+<rect x="60" y="86" width="660" height="50" class="boxa" rx="8"/>
+<text x="390" y="107" class="lbl" text-anchor="middle">deterministic layer: guarantees (free, auditable)</text>
+<text x="390" y="124" class="lbls" text-anchor="middle">events &middot; baseline digest &middot; duplicate suppression &middot; backtest coverage score</text>
+<line x1="390" y1="86" x2="390" y2="64" class="arrowa"/>
+</svg>
+<figcaption>The floor rises: checkable quality guards move to the layer that cannot hallucinate.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-7">
+<div class="idea-head"><span class="rank">7</span><h3>Speak My Language: lexicon packs + language-gap self-check</h3></div>
+<div class="badges"><span>axis <b>first-run-cold-start &middot; distribution</b></span><span>confidence <b>65%</b></span><span>complexity <b>Low</b></span></div>
+<dl class="fields">
+<dt>Description</dt>
+<dd>Extract the correction lexicon from a hardcoded regex in <code>mine.py</code> into drop-in data files (<code>lexicons/en.txt</code>, <code>lexicons/de.txt</code>, &hellip;) that the miner loads and unions at runtime, so one community contribution covers every future adopter in that language, with no Python edit and no private fork. Pair it with a self-check: when the miner sees a healthy session count but near-zero correction events, it says so plainly (&ldquo;your language may not be covered; add a lexicon pack&rdquo;) instead of failing exactly like a quiet week.</dd>
+<dt>Basis</dt>
+<dd><code>direct:</code> README: <em>&ldquo;To detect push-back in your language, edit <code>CORRECTION_RE</code> in <code>mine.py</code>&hellip; and re-run install.sh&rdquo;</em>; ADR-0006 names distribution as the project&rsquo;s governing constraint; corrections are the dominant friction signal (CONTEXT.md), so for non-EN/DE users the primary signal silently degrades with no way to tell &ldquo;found nothing&rdquo; from &ldquo;can&rsquo;t see my language.&rdquo;</dd>
+<dt>Rationale</dt>
+<dd>This is the sharpest silent value-destroyer for the distributed audience the user&rsquo;s question names (&ldquo;people&rdquo;): the tool fails invisibly for anyone outside two languages, and the documented fix is never triggered by anything the tool itself notices. Data files keep the stdlib-only constraint intact while turning a personal-config artifact into a community surface.</dd>
+<dt>Downsides</dt>
+<dd>Regex quality varies by contributor and language morphology (recall-over-precision helps; the LLM filters downstream); the self-check heuristic needs care to avoid nagging monolingual-English users with quiet weeks; small install-surface change (copy the lexicon dir).</dd>
+</dl>
+</article>
+</section>
+
+<section id="rejection-summary">
+<h2>Rejection Summary</h2>
+<div class="callout"><span class="tag">Verification note</span><br>
+A fresh-context verifier spot-checked all load-bearing <code>direct:</code> citations against the repo: none failed. Two of its &ldquo;fabricated external citation&rdquo; flags (Vstorm insight types, Dependabot acceptance rate) were overruled; both appear in the run&rsquo;s web-research digest, which the verifier didn&rsquo;t receive in full. Those candidates were still cut, on the stronger grounds below.</div>
+<table>
+<thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Denials &rarr; permission-config proposals</td><td class="refuted">Refuted: ADR-0012 explicitly reasons permission rules are worthless for this workflow (auto-accept / skip-permissions means the prompt rarely fires).</td></tr>
+<tr><td>2</td><td>SessionEnd micro-mine / live friction ticker</td><td>Unresolved write conflict with the nightly run&rsquo;s <code>events.json</code>; latency and discovery are covered cheaper by ideas 1 and 4.</td></tr>
+<tr><td>3</td><td>Below-threshold &ldquo;watchlist&rdquo; section</td><td>Sub-threshold patterns have no stable identity across runs (ADR-0010: clustering is LLM-semantic, non-deterministic); the &ldquo;still building&rdquo; claim can&rsquo;t be made reliably.</td></tr>
+<tr><td>4</td><td>Leitner-style graduated cooldown (30&rarr;90&rarr;180d)</td><td>Sound, but an amendment to <a href="https://github.com/FlorianRiquelme/sensei/issues/12">issue #12</a>&rsquo;s verdict design, not a standalone direction.</td></tr>
+<tr><td>5</td><td>Resurface stored rejection reason on re-proposal</td><td>Depends on an ADR-0013 field that doesn&rsquo;t exist yet; raise as a note on that ADR.</td></tr>
+<tr><td>6</td><td>Auto-classify reject reason from interaction shape</td><td>Clever and sound (bare-reject vs edit-then-reject is already produced, then discarded), so best folded into <a href="https://github.com/FlorianRiquelme/sensei/issues/12">issue #12</a> as &ldquo;mini-grill only on second rejection.&rdquo;</td></tr>
+<tr><td>7</td><td>Steering reasons as accumulating preference layer</td><td>Restates ADR-0013&rsquo;s own stated ambition (&ldquo;stored for future sensei runs&rdquo;) rather than adding something new.</td></tr>
+<tr><td>8</td><td>Fix denial evidence asymmetry (<code>user_text: ""</code>)</td><td>Verified real in <code>mine.py</code>, but a scoped rider on <a href="https://github.com/FlorianRiquelme/sensei/issues/13">issue #13</a>&rsquo;s follow-up-text work, not a direction.</td></tr>
+<tr><td>9</td><td>Mine wins, not just friction</td><td>Already covered by <a href="https://github.com/FlorianRiquelme/sensei/issues/9">issue #9</a> / ADR-0011&rsquo;s repetition-mining roadmap; also strains CONTEXT.md&rsquo;s deliberately narrow friction vocabulary.</td></tr>
+<tr><td>10</td><td>Root-cause taxonomy (enum, not prose)</td><td>Invisible infrastructure on its own; revisit when a consumer feature (trends, grouping) needs it.</td></tr>
+<tr><td>11</td><td>Community starter pack of seed proposals</td><td>Real cold-start value but tension with the core identity (&ldquo;mines <em>your own</em> transcripts&rdquo;), and dominated by the Founding Report for the realistic install base, which already has history to mine.</td></tr>
+<tr><td>12</td><td>Weekly deep retrospective (Sunday flagship)</td><td>Sound; revisit after the daily digest ships, since it builds on the same stats primitive and would be additive noise before then.</td></tr>
+<tr><td>13</td><td>&ldquo;Rejection intelligence&rdquo; bundle (synthesis X4)</td><td>Two of three legs depend on unmerged ADR-0013; components filed as issue-#12 amendments instead.</td></tr>
+<tr><td>&ndash;</td><td>Axis coverage</td><td>All five axes have at least one survivor; no coverage gaps.</td></tr>
+</tbody>
+</table>
+</section>
+
+<footer class="composition-signal">Composed 2026-07-18 by ce-ideate (run a7f3c2d1) from the prompt &ldquo;what do we need to provide for people to feel like sensei is useful?&rdquo; &middot; 47 raw ideas from 5 frames &middot; verified against the repo at commit e1aa379</footer>
+
+</main>
+</body>
+</html>
