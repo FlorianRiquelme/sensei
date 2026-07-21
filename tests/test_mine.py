@@ -44,6 +44,16 @@ class TestMineFixtures(unittest.TestCase):
         interrupt = by_type["interrupt"][0]
         self.assertEqual(interrupt["project"], "project-b")
 
+    def test_meta_present_and_zero_for_clean_fixtures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(FIXTURES, out_path, days=0)
+
+        meta = data["_meta"]
+        for key in ("parse_errors", "capped_sessions", "total_capped", "unreadable_files"):
+            self.assertIn(key, meta)
+            self.assertEqual(meta[key], 0)
+
 
 def load_mine_module():
     spec = importlib.util.spec_from_file_location("mine_mod", MINE_PY)
@@ -216,6 +226,120 @@ class TestMineDynamic(unittest.TestCase):
 
         self.assertLessEqual(len(data["events"]), mine_mod.MAX_PER_SESSION)
 
+    # --- GitHub #18: recall leak counter (`_meta`) -------------------------------------
+
+    def test_meta_parse_errors_counts_malformed_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            fp = os.path.join(proj_dir, "sess.jsonl")
+            with open(fp, "w") as f:
+                f.write(json.dumps({
+                    "type": "user", "timestamp": "2020-01-01T00:00:00Z",
+                    "message": {"role": "user", "content": "no, stop, that's wrong"},
+                }) + "\n")
+                f.write("not valid json\n")
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=0)
+
+        self.assertEqual(data["_meta"]["parse_errors"], 1)
+        corrections = [e for e in data["events"] if e["type"] == "correction"]
+        self.assertEqual(len(corrections), 1)
+
+    def test_meta_capped_sessions_counts_session_over_max_per_session(self):
+        mine_mod = load_mine_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            now = dt.datetime.now(dt.timezone.utc)
+            records = []
+            n = mine_mod.MAX_PER_SESSION + 3
+            for i in range(n):
+                ts = (now - dt.timedelta(hours=n - i)).isoformat().replace("+00:00", "Z")
+                records.append({
+                    "type": "user", "timestamp": ts,
+                    "message": {"role": "user", "content": f"no, stop, that's wrong number {i}"},
+                })
+            write_session(proj_dir, "sess.jsonl", records)
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=14)
+
+        self.assertEqual(data["_meta"]["capped_sessions"], 1)
+        corrections = [e for e in data["events"] if e["type"] == "correction"]
+        self.assertEqual(len(corrections), mine_mod.MAX_PER_SESSION)
+
+    def test_capped_interrupt_does_not_leak_backfill(self):
+        mine_mod = load_mine_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            now = dt.datetime.now(dt.timezone.utc)
+            records = []
+            for i in range(mine_mod.MAX_PER_SESSION):
+                ts = (now - dt.timedelta(hours=20 - i)).isoformat().replace("+00:00", "Z")
+                records.append({
+                    "type": "user", "timestamp": ts,
+                    "message": {"role": "user", "content": f"no, stop, that's wrong number {i}"},
+                })
+            # this interrupt would be the MAX_PER_SESSION+1th qualifying event -> dropped
+            ts_interrupt = (now - dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+            records.append({
+                "type": "user", "timestamp": ts_interrupt,
+                "message": {"role": "user", "content": "[Request interrupted by user for tool use]"},
+            })
+            ts_followup = now.isoformat().replace("+00:00", "Z")
+            records.append({
+                "type": "user", "timestamp": ts_followup,
+                "message": {"role": "user", "content": "use the helper function instead"},
+            })
+            write_session(proj_dir, "sess.jsonl", records)
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=14)
+
+        self.assertEqual(data["_meta"]["capped_sessions"], 1)
+        interrupts = [e for e in data["events"] if e["type"] == "interrupt"]
+        self.assertEqual(len(interrupts), 0)
+        corrections = [e for e in data["events"] if e["type"] == "correction"]
+        self.assertEqual(len(corrections), mine_mod.MAX_PER_SESSION)
+        for c in corrections:
+            self.assertNotIn("followup_text", c)
+
+    def test_meta_unreadable_file_counts_and_emits_no_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            # a directory named *.jsonl matches the glob but raises IsADirectoryError
+            # (an OSError subclass) on open() — portable and root-safe.
+            os.makedirs(os.path.join(proj_dir, "sess.jsonl"))
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=0)
+
+        self.assertEqual(data["_meta"]["unreadable_files"], 1)
+        self.assertEqual(len(data["events"]), 0)
+
+    def test_meta_total_capped_counts_events_over_max_total(self):
+        mine_mod = load_mine_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            now = dt.datetime.now(dt.timezone.utc)
+            n_sessions = (mine_mod.MAX_TOTAL // mine_mod.MAX_PER_SESSION) + 3
+            for s in range(n_sessions):
+                records = []
+                for i in range(mine_mod.MAX_PER_SESSION):
+                    ts = (now - dt.timedelta(hours=i, minutes=s)).isoformat().replace("+00:00", "Z")
+                    records.append({
+                        "type": "user", "timestamp": ts,
+                        "message": {"role": "user", "content": f"no, stop, that's wrong number {i}"},
+                    })
+                write_session(proj_dir, f"sess{s}.jsonl", records)
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=14)
+
+        produced = n_sessions * mine_mod.MAX_PER_SESSION
+        self.assertEqual(len(data["events"]), mine_mod.MAX_TOTAL)
+        self.assertEqual(data["_meta"]["total_capped"], produced - mine_mod.MAX_TOTAL)
+
     # --- U3: `repeat` event type with structural thinning (ADR-0011) ------------------
 
     def test_repeat_emitted_for_phrase_across_three_sessions(self):
@@ -315,7 +439,7 @@ class TestMineDigest(unittest.TestCase):
             with open(digest_path_for(out_path)) as f:
                 digest = json.load(f)
 
-        for field in ("date", "generated_at", "sessions_scanned", "events_total", "by_type", "by_project"):
+        for field in ("date", "generated_at", "sessions_scanned", "events_total", "by_type", "by_project", "_meta"):
             self.assertIn(field, digest)
 
         self.assertEqual(digest["events_total"], len(data["events"]))
@@ -328,6 +452,7 @@ class TestMineDigest(unittest.TestCase):
         self.assertEqual(digest["by_project"].get("project-a"), 1)
         self.assertEqual(digest["by_project"].get("project-b"), 2)
         self.assertEqual(digest["date"], dt.datetime.now().date().isoformat())
+        self.assertEqual(digest["_meta"], data["_meta"])
 
     def test_digest_local_date_not_derived_from_utc_generated_at(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -361,6 +486,8 @@ class TestMineDigest(unittest.TestCase):
         self.assertEqual(digest["events_total"], 0)
         self.assertEqual(digest["by_type"], {})
         self.assertEqual(digest["by_project"], {})
+        for key in ("parse_errors", "capped_sessions", "total_capped", "unreadable_files"):
+            self.assertEqual(digest["_meta"][key], 0)
 
 
 if __name__ == "__main__":
