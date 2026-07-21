@@ -151,7 +151,8 @@ def load_ledger_anchors(decisions_path, *, now):
     anchor's pre-accept slice, floored at REPEAT_WINDOW_DAYS."""
     anchors_by_key = {}
     try:
-        lines = open(decisions_path, errors="ignore").readlines()
+        with open(decisions_path, errors="ignore") as f:
+            lines = f.readlines()
     except OSError:
         lines = []
 
@@ -217,7 +218,8 @@ def load_untriggered_keys(decisions_path):
     accepted decision are excluded (they anchor and are measured instead, PD6)."""
     triggered, untriggered = set(), set()
     try:
-        lines = open(decisions_path, errors="ignore").readlines()
+        with open(decisions_path, errors="ignore") as f:
+            lines = f.readlines()
     except OSError:
         lines = []
     for line in lines:
@@ -257,7 +259,8 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
     earliest_ts = None
 
     try:
-        lines = open(fp, errors="ignore").readlines()
+        with open(fp, errors="ignore") as f:
+            lines = f.readlines()
     except OSError:
         return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts
 
