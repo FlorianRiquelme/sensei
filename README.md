@@ -34,7 +34,7 @@ preserves everything under `~/.claude/sensei/` (decisions, proposals, digests, l
 1. **Miner** — `mine.py`. Deterministic, zero-token, stdlib-only Python. The only component that
    reads raw transcripts (`~/.claude/projects/**/*.jsonl`); it emits friction and repeat events to
    `~/.claude/sensei/events.json` and touches nothing else (ADR-0001).
-2. **Skill** — `~/.claude/skills/sensei/`. Two modes:
+2. **Skill** — `~/.claude/skills/sensei/`. Three modes:
    - `/sensei nightly` — headless, run by launchd. Reads the mined events, clusters them, and
      writes a proposal report to `~/.claude/sensei/proposals/YYYY-MM-DD.md` — a prose edit, a
      habit-rule, or (if an already-accepted rule keeps failing to stick) a proposed hook.
@@ -42,6 +42,10 @@ preserves everything under `~/.claude/sensei/` (decisions, proposals, digests, l
    - `/sensei review` — interactive, run by you in the morning. Walks the proposals one at a time,
      runs a short "why?" on any reject, and applies the prose/habit-rule proposals you accept. A
      hook proposal is presented, never applied — you install it.
+   - `/sensei status` — interactive. Renders the effectiveness ledger: one honest
+     Working/Not working/Inconclusive/Not measurable yet line per accepted rule that carries a
+     machine-checkable trigger, comparing friction in the 14 days before acceptance against the
+     last 14 days with the *same* trigger on both sides (ADR-0016).
 3. **Scheduler** — a launchd agent (`sh.sensei`) that runs the miner and then `/sensei nightly`
    at 05:30, logging to `~/.claude/sensei/logs/nightly.log`. The miner also writes a dated
    Digest (`~/.claude/sensei/digests/YYYY-MM-DD.json`) — its presence is proof the patrol ran.

@@ -5,13 +5,15 @@ description: >
   (corrections, tool-use denials, interrupts) and for habits (directives you
   re-supply every session with no friction at all), proposes concrete diffs to
   CLAUDE.md / skills — or, for a rule that keeps failing after acceptance, a
-  proposed hook — and lets you accept/reject them over coffee. Two modes via
+  proposed hook — and lets you accept/reject them over coffee. Three modes via
   args: "nightly" (headless, run by launchd — mines + writes proposals, never
-  edits config) and "review" (interactive, morning — walks proposals one at a
-  time, runs a mini-grill on reject, and applies what you accept). Use when the
-  user invokes "/sensei nightly", "/sensei review", or asks to review sensei's
-  proposals.
-argument-hint: "nightly | review"
+  edits config), "review" (interactive, morning — walks proposals one at a
+  time, runs a mini-grill on reject, and applies what you accept), and "status"
+  (interactive — renders one honest Working/Not working/Inconclusive/Not
+  measurable yet line per measurable accepted rule). Use when the user invokes
+  "/sensei nightly", "/sensei review", "/sensei status", or asks to review
+  sensei's proposals or whether its rules are actually working.
+argument-hint: "nightly | review | status"
 disable-model-invocation: true
 ---
 
@@ -19,8 +21,8 @@ disable-model-invocation: true
 
 Miner lives at `~/.claude/skills/sensei/mine.py` (installed alongside this skill by
 `install.sh`, stdlib-only Python — reads `~/.claude/projects/**/*.jsonl`, writes
-`~/.claude/sensei/events.json`). This skill has two modes, chosen by the argument
-("nightly" or "review"). If no argument was given, ask which mode.
+`~/.claude/sensei/events.json`). This skill has three modes, chosen by the argument
+("nightly", "review", or "status"). If no argument was given, ask which mode.
 
 State lives under `~/.claude/sensei/`:
 - `events.json` — latest miner output (overwritten each run). Each event is a `correction`,
@@ -30,14 +32,26 @@ State lives under `~/.claude/sensei/`:
   instead of a single session — they're already cross-session by construction. A top-level
   `_meta` block (`parse_errors`, `capped_sessions`, `total_capped`, `unreadable_files`) reports
   the miner's own silent drops (GitHub #18); ignore it when clustering events.
+- `ledger.json` — latest effectiveness-ledger output (overwritten each run, ADR-0016). One row
+  per accepted rule (`key`): `standing` (`working` | `not_working` | `inconclusive` |
+  `not_measurable_yet`), `trigger_present` (false for a rule with no inferable trigger — those
+  always read `not_measurable_yet`), `pre_accept_friction`, `current_friction`,
+  `current_opportunities`, `days_since_accept`, `fallback` (true when the pre-accept slice aged
+  out and `baseline_seed` is used instead), `baseline_seed`. Measured rows are computed by the
+  miner over two equal 14-day slices with the rule's own trigger on both sides — never recomputed
+  by this skill (see Mode: status).
 - `decisions.jsonl` — append-only log of every past verdict:
-  `{"date", "title", "key", "verdict", "target", "reason", "reason_kind", "tier", "baseline"}`.
+  `{"date", "title", "key", "verdict", "target", "reason", "reason_kind", "tier", "baseline",
+  "trigger"}`.
   `verdict` is one of `accepted`, `reject-retry-narrower`, `reject-not-wanted`, or the legacy
   bare `rejected`. `reason`/`reason_kind` are only present on the two structured reject
   verdicts (see review step 3). `tier` is only present on an **accepted** decision that came
   from a hook proposal (`tier: "hook"`) — its absence means prose/habit-rule, the default tier.
   `baseline` is the qualifying event count captured on an **accepted** prose/habit-rule decision
-  (see review step 3); nothing reads it yet.
+  (see review step 3); nothing reads it yet. `trigger` is an optional array copied verbatim from
+  an **accepted** prose/habit-rule proposal's `Trigger` line, when the proposal had one (see
+  nightly step 4 and review step 3); its absence is the default and never affects cooldown,
+  dedup, or escalation — those key on the stable `key` field only.
 - `proposals/YYYY-MM-DD.md` — one report per nightly run.
 - `logs/nightly.log` — launchd stdout/stderr.
 
@@ -126,12 +140,20 @@ it produces a ready artifact but never writes it.
      - **Root cause** — one sentence.
      - **Target file** — exact path.
      - **Exact text** — the literal diff to add/change, ready to paste as-is.
+     - **Trigger** (optional) — only when a machine-checkable trigger is genuinely inferable
+       from the pattern (a tool name, a keyword/substring, or a path glob — arbitrary regex is
+       out of scope); omit the line entirely when no clean trigger exists, don't force one. When
+       present, emit it as its own line, exactly: `- **Trigger:** <one-line JSON array>`, an array
+       of AND-ed clauses `{"kind": "tool"|"keyword"|"glob", "value": "<string>"}` (AND is the only
+       combinator — no OR, no nesting). A single-clause trigger is a one-element array, e.g.
+       `- **Trigger:** [{"kind":"tool","value":"Bash"},{"kind":"keyword","value":"artisan"}]`.
 
    - **Habit-rule proposal** (repeat pattern) — same shape as a prose proposal (title, key,
-     evidence, supporting events, root cause, target file, exact text), except evidence is drawn
-     from the `repeat` event's re-supplied phrasing (tag each quote with its `project` from the
-     event's `projects` list) and root cause reads as "you re-supply this every session" rather
-     than "this caused friction." The exact text is still a normal prose rule for CLAUDE.md/SKILL.md.
+     evidence, supporting events, root cause, target file, exact text, optional trigger), except
+     evidence is drawn from the `repeat` event's re-supplied phrasing (tag each quote with its
+     `project` from the event's `projects` list) and root cause reads as "you re-supply this
+     every session" rather than "this caused friction." The exact text is still a normal prose
+     rule for CLAUDE.md/SKILL.md.
 
    - **Hook proposal** (escalation, from step 2's exception) — a pattern already covered by an
      accepted rule but still qualifying past the grace period escalates instead of being skipped.
@@ -198,13 +220,50 @@ Interactive, run by the human in the morning.
    - For every proposal (accepted, rejected, or edited-then-accepted), append one line to
      `~/.claude/sensei/decisions.jsonl`:
      ```json
-     {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted|reject-retry-narrower|reject-not-wanted", "target": "...", "reason": "...", "reason_kind": "steering|config-truth", "tier": "hook", "baseline": N}
+     {"date": "YYYY-MM-DD", "title": "...", "key": "...", "verdict": "accepted|reject-retry-narrower|reject-not-wanted", "target": "...", "reason": "...", "reason_kind": "steering|config-truth", "tier": "hook", "baseline": N, "trigger": [...]}
      ```
      Omit `reason`/`reason_kind` on `accepted` lines — they only apply to the two reject
      verdicts. Omit `tier` entirely except on an accepted hook decision. On an **accepted** prose
      or habit-rule line, additionally copy the proposal's `Supporting events` value as
      `baseline: N`; rejected and hook lines carry no `baseline` (nothing reads it yet — it seeds a
-     future track-record slice). Copy the `key` verbatim from the proposal — the cooldown, dedup,
-     and escalation logic in nightly step 2 all depend on it being stable across runs.
+     future track-record slice). On the same **accepted** prose or habit-rule line, if the
+     proposal carried a `Trigger` line, copy its JSON array verbatim as `"trigger": [...]`; omit
+     the field entirely when the proposal had none. Hook-tier decisions never carry a `trigger`
+     (hooks enforce, they aren't measured). Copy the `key` verbatim from the proposal — the
+     cooldown, dedup, and escalation logic in nightly step 2 all depend on it being stable across
+     runs.
 4. When all proposals in the file are decided, tell the user how many were accepted/rejected,
    and call out any hook proposals that still need manual installation.
+
+## Mode: status
+
+Interactive. Renders the effectiveness ledger (ADR-0016) — whether each measurable accepted
+rule actually reduced friction. This mode **reads `~/.claude/sensei/ledger.json` only**; it never
+recomputes the join and never reads transcripts (ADR-0001 reserves that to the miner). The miner
+already classified each rule's Standing (two equal 14-day slices, same trigger both sides) — this
+mode's whole job is rendering it plainly, never re-deriving one.
+
+1. If `~/.claude/sensei/ledger.json` is missing, or its `generated_at` is older than the newest
+   file under `~/.claude/sensei/digests/` (mirror the nudge's failure posture — mining hasn't run
+   recently enough to trust), say so plainly and stop. Don't render stale confidence.
+2. For each row, render one line using the Standing's honest vocabulary — no other wording, and
+   never a bare "Working" the row doesn't itself claim:
+   - **`working`** — `<key>: <pre_accept_friction>/wk -> <current_friction> since <accept date>.
+     Working.` (approximate the "/wk" framing from `pre_accept_friction` over the 14-day slice;
+     exact phrasing may adapt to the row's numbers, but the Standing word itself is never
+     softened or upgraded).
+   - **`not_working`** — `<key>: still ~<current_friction>/wk. Not working.`
+   - **`inconclusive`** — `<key>: Inconclusive` — if `fallback` is true, add that the pre-accept
+     window aged out and this falls back to the stored `baseline_seed` (mixed-instrument, not a
+     confident comparison); otherwise this means the trigger's context hasn't come up this
+     window (no opportunities), so there's nothing yet to judge.
+   - **`not_measurable_yet`** — `<key>: Not measurable yet` (no trigger, or still within the
+     grace period since acceptance).
+   Group or label the `not_measurable_yet` rows separately from the three "judged" Standings so
+   the sparse, forward-looking nature of the ledger (D4) is visible at a glance, not buried.
+3. Emit the framing note once, near the top or bottom of the output: this Standing is a
+   *measurement* lens (a deterministic before/after count), distinct from ADR-0012's escalation,
+   which is an *action* lens (a fuzzy re-qualification proxy that drafts a hook proposal). The two
+   can disagree on the same rule without contradiction — a `Working` line here and a same-rule
+   hook proposal in this morning's `review` are two honest, independent readings, not a bug.
+4. No dialog tool needed — this is a conversation, same posture as `review`'s plain-text walk.
