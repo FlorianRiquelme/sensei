@@ -31,11 +31,13 @@ State lives under `~/.claude/sensei/`:
   text after the interrupt, if any). `repeat` events carry `session_count` and `projects`
   instead of a single session — they're already cross-session by construction.
 - `ledger.json` — latest effectiveness-ledger output (overwritten each run, ADR-0016). One row
-  per accepted, triggered rule (`key`): `standing` (`working` | `not_working` | `inconclusive` |
-  `not_measurable_yet`), `pre_accept_friction`, `current_friction`, `current_opportunities`,
-  `days_since_accept`, `fallback` (true when the pre-accept slice aged out and `baseline_seed`
-  is used instead), `baseline_seed`. Computed by the miner over two equal 14-day slices with the
-  rule's own trigger on both sides — never recomputed by this skill (see Mode: status).
+  per accepted rule (`key`): `standing` (`working` | `not_working` | `inconclusive` |
+  `not_measurable_yet`), `trigger_present` (false for a rule with no inferable trigger — those
+  always read `not_measurable_yet`), `pre_accept_friction`, `current_friction`,
+  `current_opportunities`, `days_since_accept`, `fallback` (true when the pre-accept slice aged
+  out and `baseline_seed` is used instead), `baseline_seed`. Measured rows are computed by the
+  miner over two equal 14-day slices with the rule's own trigger on both sides — never recomputed
+  by this skill (see Mode: status).
 - `decisions.jsonl` — append-only log of every past verdict:
   `{"date", "title", "key", "verdict", "target", "reason", "reason_kind", "tier", "baseline",
   "trigger"}`.

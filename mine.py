@@ -196,7 +196,10 @@ def load_ledger_anchors(decisions_path, *, now):
             "current_slice": (now - dt.timedelta(days=SLICE_DAYS), now),
             "days_since_accept": (now - accept_date).days,
         })
-        needed = (now - pre_start).days
+        # round up: pre_start is at midnight while `now` carries a time-of-day, so an
+        # integer-day floor would leave ledger_cutoff a few hours short of the slice start
+        # and spuriously age it out. ceil guarantees the walk reaches the whole slice.
+        needed = math.ceil((now - pre_start).total_seconds() / 86400)
         if needed > max_lookback_needed:
             max_lookback_needed = needed
 
@@ -207,7 +210,33 @@ def load_ledger_anchors(decisions_path, *, now):
 
     return anchors, lookback_days
 
-def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=None):
+def load_untriggered_keys(decisions_path):
+    """Accepted, non-hook decision keys that carry NO trigger and have no triggered
+    sibling under the same key. These render as `not_measurable_yet` (R11/AE4) — the one
+    honest thing the ledger can say about a rule it cannot measure. Keys with any triggered
+    accepted decision are excluded (they anchor and are measured instead, PD6)."""
+    triggered, untriggered = set(), set()
+    try:
+        lines = open(decisions_path, errors="ignore").readlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if d.get("verdict") != "accepted" or d.get("tier") == "hook":
+            continue
+        key = d.get("key")
+        if not key:
+            continue
+        (triggered if d.get("trigger") else untriggered).add(key)
+    return sorted(untriggered - triggered)
+
+def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=None, ledger_cutoff=None):
     """Read one transcript once. Returns (events, in_friction_window, in_repeat_window,
     repeat_phrases, earliest_ts) — repeat_phrases is the set of this session's normalized
     candidate phrases within the repeat window; non-ubiquity is computed across sessions
@@ -219,8 +248,8 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
     in_friction_window = friction_cutoff is None
     in_repeat_window = repeat_cutoff is None
     last_assistant_text = ""
-    tool_uses = {}  # tool_use_id -> (name, input_str, matched_anchor_indices)
-    pending_matched = set()  # compound-anchor indices awaiting the human's next reply (PD3)
+    tool_uses = {}  # tool_use_id -> (name, input_str, {anchor_idx: slice_name})
+    pending_matched = {}  # compound-anchor idx -> the tool_use's slice, awaiting the human's next reply (PD3)
     pending_interrupt = None  # last-emitted interrupt event awaiting a followup_text (KTD-3)
     correction_n = 0
     interrupt_n = 0
@@ -264,16 +293,20 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
                 elif b.get("type") == "tool_use":
                     name = b.get("name", "?")
                     input_str = json.dumps(b.get("input", {}))[:200]
-                    matched = set()
+                    matched = {}  # anchor idx -> this tool_use's slice; friction is credited there
                     for idx, anchor in enumerate(anchors):
-                        if anchor.get("is_compound") and is_opportunity(
-                            anchor["trigger"], tool_name=name, tool_input=input_str, user_text=""
-                        ):
-                            matched.add(idx)
-                            if anchor_slice(rdt, anchor) == "current":
-                                anchor["current_opportunities"] += 1
+                        if not anchor.get("is_compound"):
+                            continue
+                        if not is_opportunity(anchor["trigger"], tool_name=name, tool_input=input_str, user_text=""):
+                            continue
+                        sl = anchor_slice(rdt, anchor)
+                        if sl is None:
+                            continue  # only a tool_use inside a slice is an opportunity — keeps friction ⊆ opportunities (PD3)
+                        if sl == "current":
+                            anchor["current_opportunities"] += 1
+                        matched[idx] = sl
                     tool_uses[b.get("id")] = (name, input_str, matched)
-                    pending_matched |= matched
+                    pending_matched.update(matched)
             continue
 
         if rtype != "user":
@@ -281,7 +314,13 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
 
         friction_ok = friction_cutoff is None or (rdt and rdt >= friction_cutoff)
         repeat_ok = repeat_cutoff is None or (rdt and rdt >= repeat_cutoff)
-        if not friction_ok and not repeat_ok:
+        # ledger_ok widens this single walk back over each anchor's pre-accept slice (up to
+        # MAX_LEDGER_LOOKBACK_DAYS) so its baseline is counted with the same instrument as the
+        # current slice. Event/repeat emission below stays gated on friction_ok/repeat_ok — a
+        # ledger-only record contributes to anchor counts but is never emitted as an event.
+        # Without this the baseline truncates at the 30-day repeat window (ADR-0016/D3).
+        ledger_ok = ledger_cutoff is None or (rdt and rdt >= ledger_cutoff)
+        if not friction_ok and not repeat_ok and not ledger_ok:
             continue
 
         # denial: tool_result whose content says the user rejected the tool use
@@ -292,23 +331,23 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
             result_text = block_text(b.get("content"))
             low = result_text.lower()
             if "doesn't want to proceed" in low or "user rejected" in low:
-                tname, tinput, matched = tool_uses.get(b.get("tool_use_id"), ("?", "", set()))
+                tname, tinput, matched = tool_uses.get(b.get("tool_use_id"), ("?", "", {}))
                 if friction_ok and len(events) < MAX_PER_SESSION:
                     events.append({
                         "ts": ts, "project": project, "session": session, "type": "denial",
                         "user_text": "", "assistant_context": last_assistant_text[:500],
                         "tool": tname, "tool_input": tinput,
                     })
-                for idx in matched:
+                for idx, slice_name in matched.items():
                     anchor = anchors[idx]
-                    slice_name = anchor_slice(rdt, anchor)
                     if slice_name == "current":
                         anchor["current_friction"] += 1
                     elif slice_name == "pre_accept":
                         anchor["pre_accept_friction"] += 1
                 # already credited via the tool_use_id link above — don't let a
                 # follow-up correction ("no, use X instead") double-count it below.
-                pending_matched -= matched
+                for idx in matched:
+                    pending_matched.pop(idx, None)
                 denied = True
         if denied:
             continue
@@ -322,6 +361,10 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
         is_slash_command = stripped.startswith("/")
         is_interrupt = stripped.startswith("[Request interrupted by user")
         is_correction = (not is_interrupt) and len(stripped) <= 2000 and bool(CORRECTION_RE.search(user_text))
+        # ledger friction excludes slash commands: a custom command whose text happens to
+        # hit the correction lexicon ("/use-ddev-instead") is structural, not real friction.
+        # Scoped to the ledger only — the `correction` event stream is left unchanged.
+        is_ledger_friction = (is_interrupt or is_correction) and not is_slash_command
 
         # ledger: a compound trigger's opportunity is a tool_use block (PD3), which the
         # transcript never links directly to a later correction/interrupt (unlike a
@@ -330,15 +373,14 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
         # friction. Consumed once per reply so a later, unrelated correction can't be
         # misattributed to a stale match.
         if pending_matched:
-            if is_interrupt or is_correction:
-                for idx in pending_matched:
+            if is_ledger_friction:
+                for idx, slice_name in pending_matched.items():
                     anchor = anchors[idx]
-                    slice_name = anchor_slice(rdt, anchor)
                     if slice_name == "current":
                         anchor["current_friction"] += 1
                     elif slice_name == "pre_accept":
                         anchor["pre_accept_friction"] += 1
-            pending_matched = set()
+            pending_matched = {}
 
         # ledger: pure-keyword triggers (no tool/glob clause) are tested against user
         # text only (PD3) — opportunity here, friction if this same record is already
@@ -351,10 +393,10 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=N
             slice_name = anchor_slice(rdt, anchor)
             if slice_name == "current":
                 anchor["current_opportunities"] += 1
-                if is_interrupt or is_correction:
+                if is_ledger_friction:
                     anchor["current_friction"] += 1
             elif slice_name == "pre_accept":
-                if is_interrupt or is_correction:
+                if is_ledger_friction:
                     anchor["pre_accept_friction"] += 1
 
         # backfill followup_text on the pending interrupt (KTD-3) — any qualifying plain
@@ -411,7 +453,11 @@ def main():
 
     # effectiveness ledger (ADR-0016): anchors are derived once up front, then
     # accumulated in the same per-file walk below — no second pass over transcripts.
-    anchors, _lookback_days = load_ledger_anchors(args.decisions, now=now)
+    # ledger_cutoff widens that walk back over the oldest anchor's pre-accept slice
+    # (bounded by MAX_LEDGER_LOOKBACK_DAYS, floored at the repeat window). None under
+    # --days 0 (all-time), matching the friction/repeat cutoffs.
+    anchors, lookback_days = load_ledger_anchors(args.decisions, now=now)
+    ledger_cutoff = now - dt.timedelta(days=lookback_days) if args.days > 0 else None
     for a in anchors:
         a["is_compound"] = any(isinstance(c, dict) and c.get("kind") in ("tool", "glob") for c in a["trigger"])
         a["pre_accept_friction"] = 0
@@ -432,7 +478,7 @@ def main():
         project = os.path.basename(os.path.dirname(fp))
         session = os.path.splitext(os.path.basename(fp))[0]
         events, in_friction, in_repeat, phrases, earliest_ts = mine_session(
-            fp, project, session, friction_cutoff, repeat_cutoff, anchors
+            fp, project, session, friction_cutoff, repeat_cutoff, anchors, ledger_cutoff=ledger_cutoff
         )
         if earliest_ts is not None and (earliest_ts_overall is None or earliest_ts < earliest_ts_overall):
             earliest_ts_overall = earliest_ts
@@ -478,15 +524,21 @@ def main():
     # Effectiveness ledger (ADR-0016): one row per anchor, recomputed from scratch each
     # run (no cross-run accumulation) — written even with zero anchors so /sensei status
     # can distinguish "ledger empty" from "ledger missing".
+    # The aged-out fallback (PD4 step 3) keys on how far back the walk actually reached:
+    # the later of the ledger cutoff and the earliest record on disk. A pre-accept slice
+    # starting before that floor could not be measured with the same instrument, so it
+    # falls back to the stored baseline rather than reporting a truncated count as fact.
+    read_floor = earliest_ts_overall
+    if ledger_cutoff is not None:
+        read_floor = ledger_cutoff if read_floor is None else max(ledger_cutoff, read_floor)
+
     ledger_rows = []
     for a in anchors:
         fallback = False
         baseline_seed = None
-        if not a["trigger"]:
+        if a["days_since_accept"] < GRACE_DAYS:
             standing = "not_measurable_yet"
-        elif a["days_since_accept"] < GRACE_DAYS:
-            standing = "not_measurable_yet"
-        elif earliest_ts_overall is not None and a["pre_accept_slice"][0] < earliest_ts_overall:
+        elif read_floor is not None and a["pre_accept_slice"][0] < read_floor:
             standing = "inconclusive"
             fallback = True
             baseline_seed = a["baseline"]
@@ -505,6 +557,17 @@ def main():
             "current_opportunities": a["current_opportunities"],
             "days_since_accept": a["days_since_accept"],
             "fallback": fallback, "baseline_seed": baseline_seed,
+        })
+    # Accepted rules with no inferable trigger can't be measured, but they still get an
+    # honest line (R11/AE4): rendered `not_measurable_yet`, distinct from the measured rows.
+    anchor_keys = {a["key"] for a in anchors}
+    for key in load_untriggered_keys(args.decisions):
+        if key in anchor_keys:
+            continue
+        ledger_rows.append({
+            "key": key, "standing": "not_measurable_yet", "trigger_present": False,
+            "pre_accept_friction": 0, "current_friction": 0, "current_opportunities": 0,
+            "days_since_accept": None, "fallback": False, "baseline_seed": None,
         })
     ledger_out = {"generated_at": generated_at, "rows": ledger_rows}
     with open(os.path.join(os.path.dirname(args.out), "ledger.json"), "w") as f:

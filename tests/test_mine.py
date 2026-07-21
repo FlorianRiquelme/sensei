@@ -732,7 +732,9 @@ class TestLedgerIntegration(unittest.TestCase):
         row = self._row(ledger, "ae4a")
         self.assertEqual(row["standing"], "not_measurable_yet")
 
-    def test_ae4b_key_without_trigger_produces_no_row(self):
+    def test_ae4b_key_without_trigger_renders_not_measurable_yet(self):
+        # AE4/R11: an accepted rule with no inferable trigger still gets an honest line —
+        # a not_measurable_yet row with trigger_present=False — not silent absence.
         with tempfile.TemporaryDirectory() as tmp:
             proj_dir = os.path.join(tmp, "projects", "proj")
             os.makedirs(proj_dir)
@@ -749,7 +751,32 @@ class TestLedgerIntegration(unittest.TestCase):
             with open(ledger_path_for(out_path)) as f:
                 ledger = json.load(f)
 
-        self.assertEqual([r for r in ledger["rows"] if r["key"] == "ae4b"], [])
+        row = self._row(ledger, "ae4b")
+        self.assertEqual(row["standing"], "not_measurable_yet")
+        self.assertFalse(row["trigger_present"])
+
+    def test_hook_only_and_triggered_keys_dont_duplicate_as_not_measurable(self):
+        # A hook-tier decision never produces a not_measurable_yet row; a key that also
+        # has a triggered decision is measured (one row), never both.
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            write_session(proj_dir, "sess.jsonl", [self._filler()])
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [
+                {"date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                 "key": "hook-only", "verdict": "accepted", "tier": "hook"},
+                self._decision("measured", 40),  # triggered — should stay a single measured row
+            ])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        self.assertEqual([r for r in ledger["rows"] if r["key"] == "hook-only"], [])
+        self.assertEqual(len([r for r in ledger["rows"] if r["key"] == "measured"]), 1)
 
     def test_ae5_fallback_when_pre_accept_slice_predates_available_data(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -851,6 +878,140 @@ class TestLedgerIntegration(unittest.TestCase):
         self.assertEqual(len(by_type.get("denial", [])), 1)
         self.assertEqual(len(by_type.get("interrupt", [])), 1)
         self.assertEqual(len(data["events"]), 3)
+
+    def test_ae1_working_under_production_days_window(self):
+        # Regression for the discarded-lookback bug: the pre-accept slice of a rule accepted
+        # 40 days ago sits well outside the 30-day repeat window, so under the real nightly
+        # `--days 14` invocation the baseline must still be counted (the walk widens to the
+        # ledger lookback). Before the fix this produced pre_accept_friction=0 -> inconclusive.
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler()]
+            for d in (45, 44, 43, 42, 41):  # pre-accept slice [54, 40]d, all older than 30d
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, don't run artisan like that"}})
+            for d in (5, 4, 3):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "please run artisan migrate"}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("ae1-prod", 40)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=14, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae1-prod")
+        self.assertEqual(row["pre_accept_friction"], 5)
+        self.assertEqual(row["current_opportunities"], 3)
+        self.assertEqual(row["standing"], "working")
+        self.assertFalse(row["fallback"])
+
+    def test_compound_dead_zone_tool_use_never_credits_phantom_friction(self):
+        # PD3 invariant: friction matches subset of opportunities. A compound tool_use in the
+        # dead zone between accept date and the current slice is not an opportunity in any
+        # measured slice, so a later current-slice correction must not credit friction to it.
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [
+                self._filler(),
+                {"type": "assistant", "timestamp": iso(self.now - dt.timedelta(days=30)),
+                 "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "toolu_dz", "name": "Bash",
+                      "input": {"command": "php artisan migrate"}}]}},
+                {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=5)),
+                 "message": {"role": "user", "content": "no, use ddev artisan instead"}},
+            ]
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [{
+                "date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                "key": "dead-zone", "verdict": "accepted", "tier": "user", "baseline": 5,
+                "trigger": [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}],
+            }])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "dead-zone")
+        self.assertEqual(row["current_opportunities"], 0)
+        self.assertEqual(row["current_friction"], 0)
+
+    def test_compound_slash_command_reply_is_not_friction(self):
+        # A slash command whose text hits the correction lexicon ("/use-ddev-instead") is
+        # structural, not real friction — it must not be counted against a rule's Standing.
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [
+                self._filler(),
+                {"type": "assistant", "timestamp": iso(self.now - dt.timedelta(days=5)),
+                 "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "toolu_sc", "name": "Bash",
+                      "input": {"command": "ddev artisan migrate"}}]}},
+                {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=5)),
+                 "message": {"role": "user", "content": "/use-ddev-instead"}},
+            ]
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [{
+                "date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                "key": "slash-cmd", "verdict": "accepted", "tier": "user", "baseline": 5,
+                "trigger": [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}],
+            }])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "slash-cmd")
+        self.assertEqual(row["current_opportunities"], 1)
+        self.assertEqual(row["current_friction"], 0)
+
+    def test_pending_match_cleared_by_intervening_non_friction_reply(self):
+        # The "consumed once per reply" promise: a successful (non-friction) reply after a
+        # matching tool call clears the pending match, so a later unrelated correction can't
+        # be misattributed to that stale tool call.
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [
+                self._filler(),
+                {"type": "assistant", "timestamp": iso(self.now - dt.timedelta(days=6)),
+                 "message": {"role": "assistant", "content": [
+                     {"type": "tool_use", "id": "toolu_pm", "name": "Bash",
+                      "input": {"command": "ddev artisan migrate"}}]}},
+                {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=6)),
+                 "message": {"role": "user", "content": "great, thanks"}},
+                {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=5)),
+                 "message": {"role": "user", "content": "no, that command was wrong"}},
+            ]
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [{
+                "date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                "key": "stale-pending", "verdict": "accepted", "tier": "user", "baseline": 5,
+                "trigger": [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}],
+            }])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "stale-pending")
+        self.assertEqual(row["current_opportunities"], 1)
+        self.assertEqual(row["current_friction"], 0)
 
 
 if __name__ == "__main__":
