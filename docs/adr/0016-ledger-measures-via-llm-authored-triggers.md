@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted — implemented (issue #19)
 ---
 
 # The effectiveness ledger measures via LLM-authored deterministic triggers

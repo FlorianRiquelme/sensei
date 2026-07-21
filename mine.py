@@ -10,7 +10,7 @@ Usage:
   python3 mine.py --days 0       # all time (disables both the friction and repeat cutoffs)
   python3 mine.py --out PATH     # default ~/.claude/sensei/events.json
 """
-import json, os, re, glob, argparse, datetime as dt
+import json, os, re, glob, argparse, fnmatch, math, datetime as dt
 
 PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 MAX_PER_SESSION = 15
@@ -38,6 +38,19 @@ REPEAT_GLUE_BLOCKLIST = {
     "got it", "understood", "ack", "fine", "alright", "good", "done", "lgtm",
     "nein", "ja", "gut", "weiter", "passt", "genau", "danke",
 }
+
+# --- Effectiveness ledger (ADR-0016; PD4/PD5/D5) --------------------------------
+# A "trigger" (carried on an accepted decisions.jsonl row) anchors a before/after
+# comparison: friction in the SLICE_DAYS window before acceptance vs. the same-length
+# window right now, once GRACE_DAYS have passed. Never a bare "working" on thin data
+# (R12) — MIN_OPPORTUNITIES/MIN_BASELINE gate that; MAX_LEDGER_LOOKBACK_DAYS bounds
+# how far back the walk needs to read for even the oldest anchor's baseline slice.
+GRACE_DAYS = 14
+SLICE_DAYS = 14
+MIN_OPPORTUNITIES = 3
+MIN_BASELINE = 2
+WORKING_DROP = 0.5
+MAX_LEDGER_LOOKBACK_DAYS = 60
 
 # --- Correction lexicon -------------------------------------------------------
 # Push-back words that flag a user message as a `correction`. Ships English + German.
@@ -78,24 +91,146 @@ def normalize_phrase(text):
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
-def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
+def match_clause(clause, *, tool_name, tool_input, user_text):
+    """One AND-clause of a trigger: {"kind": "tool"|"keyword"|"glob", "value": ...}.
+    Malformed/unknown clauses fail closed (False), never raise."""
+    if not isinstance(clause, dict):
+        return False
+    kind = clause.get("kind")
+    value = clause.get("value")
+    if not kind or not value:
+        return False
+    try:
+        if kind == "tool":
+            return tool_name == value
+        if kind == "glob":
+            if not tool_input:
+                return False
+            for tok in re.split(r"[\s'\"]+", tool_input):
+                if tok and fnmatch.fnmatch(tok, value):
+                    return True
+            return False
+        if kind == "keyword":
+            haystack = f"{tool_input or ''}\n{user_text or ''}".lower()
+            return value.lower() in haystack
+    except Exception:
+        return False
+    return False
+
+def is_opportunity(trigger, *, tool_name, tool_input, user_text):
+    """A trigger (AND-list of clauses) matches this record. PD3 surface routing: a
+    compound trigger (any tool/glob clause) tests its keyword clauses against
+    tool_input only; a pure-keyword trigger tests against user_text only — assistant
+    text is never a valid surface. Empty/malformed trigger never matches."""
+    if not trigger:
+        return False
+    is_compound = any(isinstance(c, dict) and c.get("kind") in ("tool", "glob") for c in trigger)
+    eff_tool_input = tool_input if is_compound else ""
+    eff_user_text = "" if is_compound else user_text
+    for clause in trigger:
+        if not match_clause(clause, tool_name=tool_name, tool_input=eff_tool_input, user_text=eff_user_text):
+            return False
+    return True
+
+def anchor_slice(rdt, anchor):
+    """Which of an anchor's two slices (if any) a record's timestamp falls into."""
+    if rdt is None:
+        return None
+    ps, pe = anchor["pre_accept_slice"]
+    if ps <= rdt <= pe:
+        return "pre_accept"
+    cs, ce = anchor["current_slice"]
+    if cs <= rdt <= ce:
+        return "current"
+    return None
+
+def load_ledger_anchors(decisions_path, *, now):
+    """Read decisions.jsonl and derive one anchor per key: the earliest accepted,
+    triggered, non-hook-tier decision under that key (PD6). Returns (anchors,
+    lookback_days) where lookback_days is the bounded read-back window covering every
+    anchor's pre-accept slice, floored at REPEAT_WINDOW_DAYS."""
+    anchors_by_key = {}
+    try:
+        lines = open(decisions_path, errors="ignore").readlines()
+    except OSError:
+        lines = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if d.get("verdict") != "accepted":
+            continue
+        trigger = d.get("trigger")
+        if not trigger:
+            continue
+        if d.get("tier") == "hook":
+            continue
+        key = d.get("key")
+        if not key:
+            continue
+        ds = d.get("date")
+        try:
+            accept_date = dt.datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+        except Exception:
+            continue
+        existing = anchors_by_key.get(key)
+        if existing is None or accept_date < existing["accept_date"]:
+            anchors_by_key[key] = {"key": key, "trigger": trigger, "accept_date": accept_date, "baseline": d.get("baseline")}
+
+    anchors = []
+    max_lookback_needed = 0
+    for key, a in anchors_by_key.items():
+        accept_date = a["accept_date"]
+        pre_start = accept_date - dt.timedelta(days=SLICE_DAYS)
+        anchors.append({
+            "key": key,
+            "trigger": a["trigger"],
+            "accept_date": accept_date,
+            "baseline": a["baseline"],
+            "pre_accept_slice": (pre_start, accept_date),
+            "current_slice": (now - dt.timedelta(days=SLICE_DAYS), now),
+            "days_since_accept": (now - accept_date).days,
+        })
+        needed = (now - pre_start).days
+        if needed > max_lookback_needed:
+            max_lookback_needed = needed
+
+    if anchors:
+        lookback_days = max(min(MAX_LEDGER_LOOKBACK_DAYS, max_lookback_needed), REPEAT_WINDOW_DAYS)
+    else:
+        lookback_days = REPEAT_WINDOW_DAYS
+
+    return anchors, lookback_days
+
+def mine_session(fp, project, session, friction_cutoff, repeat_cutoff, anchors=None):
     """Read one transcript once. Returns (events, in_friction_window, in_repeat_window,
-    repeat_phrases) — repeat_phrases is the set of this session's normalized candidate
-    phrases within the repeat window; non-ubiquity is computed across sessions in main()."""
+    repeat_phrases, earliest_ts) — repeat_phrases is the set of this session's normalized
+    candidate phrases within the repeat window; non-ubiquity is computed across sessions
+    in main(). `anchors` (optional, mutated in place) are effectiveness-ledger anchors
+    (ADR-0016) accumulating opportunity/friction counts per slice as this same walk reads
+    each record — no second pass over the transcript."""
     events = []
     repeat_phrases = set()
     in_friction_window = friction_cutoff is None
     in_repeat_window = repeat_cutoff is None
     last_assistant_text = ""
-    tool_uses = {}  # tool_use_id -> (name, input_str)
+    tool_uses = {}  # tool_use_id -> (name, input_str, matched_anchor_indices)
+    pending_matched = set()  # compound-anchor indices awaiting the human's next reply (PD3)
     pending_interrupt = None  # last-emitted interrupt event awaiting a followup_text (KTD-3)
     correction_n = 0
     interrupt_n = 0
+    anchors = anchors or []
+    earliest_ts = None
 
     try:
         lines = open(fp, errors="ignore").readlines()
     except OSError:
-        return events, in_friction_window, in_repeat_window, repeat_phrases
+        return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts
 
     for line in lines:
         line = line.strip()
@@ -110,6 +245,8 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
 
         ts = r.get("timestamp")
         rdt = parse_ts(ts)
+        if rdt is not None and (earliest_ts is None or rdt < earliest_ts):
+            earliest_ts = rdt
         if friction_cutoff and rdt and rdt >= friction_cutoff:
             in_friction_window = True
         if repeat_cutoff and rdt and rdt >= repeat_cutoff:
@@ -125,7 +262,18 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
                 if b.get("type") == "text" and b.get("text"):
                     last_assistant_text = b["text"]
                 elif b.get("type") == "tool_use":
-                    tool_uses[b.get("id")] = (b.get("name", "?"), json.dumps(b.get("input", {}))[:200])
+                    name = b.get("name", "?")
+                    input_str = json.dumps(b.get("input", {}))[:200]
+                    matched = set()
+                    for idx, anchor in enumerate(anchors):
+                        if anchor.get("is_compound") and is_opportunity(
+                            anchor["trigger"], tool_name=name, tool_input=input_str, user_text=""
+                        ):
+                            matched.add(idx)
+                            if anchor_slice(rdt, anchor) == "current":
+                                anchor["current_opportunities"] += 1
+                    tool_uses[b.get("id")] = (name, input_str, matched)
+                    pending_matched |= matched
             continue
 
         if rtype != "user":
@@ -144,13 +292,23 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
             result_text = block_text(b.get("content"))
             low = result_text.lower()
             if "doesn't want to proceed" in low or "user rejected" in low:
+                tname, tinput, matched = tool_uses.get(b.get("tool_use_id"), ("?", "", set()))
                 if friction_ok and len(events) < MAX_PER_SESSION:
-                    tname, tinput = tool_uses.get(b.get("tool_use_id"), ("?", ""))
                     events.append({
                         "ts": ts, "project": project, "session": session, "type": "denial",
                         "user_text": "", "assistant_context": last_assistant_text[:500],
                         "tool": tname, "tool_input": tinput,
                     })
+                for idx in matched:
+                    anchor = anchors[idx]
+                    slice_name = anchor_slice(rdt, anchor)
+                    if slice_name == "current":
+                        anchor["current_friction"] += 1
+                    elif slice_name == "pre_accept":
+                        anchor["pre_accept_friction"] += 1
+                # already credited via the tool_use_id link above — don't let a
+                # follow-up correction ("no, use X instead") double-count it below.
+                pending_matched -= matched
                 denied = True
         if denied:
             continue
@@ -164,6 +322,40 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
         is_slash_command = stripped.startswith("/")
         is_interrupt = stripped.startswith("[Request interrupted by user")
         is_correction = (not is_interrupt) and len(stripped) <= 2000 and bool(CORRECTION_RE.search(user_text))
+
+        # ledger: a compound trigger's opportunity is a tool_use block (PD3), which the
+        # transcript never links directly to a later correction/interrupt (unlike a
+        # denial, tied via tool_use_id) — so the human's next reply after a matching
+        # tool call is the deterministic, structural proxy for whether it caused
+        # friction. Consumed once per reply so a later, unrelated correction can't be
+        # misattributed to a stale match.
+        if pending_matched:
+            if is_interrupt or is_correction:
+                for idx in pending_matched:
+                    anchor = anchors[idx]
+                    slice_name = anchor_slice(rdt, anchor)
+                    if slice_name == "current":
+                        anchor["current_friction"] += 1
+                    elif slice_name == "pre_accept":
+                        anchor["pre_accept_friction"] += 1
+            pending_matched = set()
+
+        # ledger: pure-keyword triggers (no tool/glob clause) are tested against user
+        # text only (PD3) — opportunity here, friction if this same record is already
+        # classified as an interrupt or correction below.
+        for anchor in anchors:
+            if anchor.get("is_compound"):
+                continue
+            if not is_opportunity(anchor["trigger"], tool_name=None, tool_input="", user_text=stripped):
+                continue
+            slice_name = anchor_slice(rdt, anchor)
+            if slice_name == "current":
+                anchor["current_opportunities"] += 1
+                if is_interrupt or is_correction:
+                    anchor["current_friction"] += 1
+            elif slice_name == "pre_accept":
+                if is_interrupt or is_correction:
+                    anchor["pre_accept_friction"] += 1
 
         # backfill followup_text on the pending interrupt (KTD-3) — any qualifying plain
         # text closes it out; another interrupt or a slash command does not.
@@ -198,21 +390,33 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
             if len(norm) >= REPEAT_LENGTH_FLOOR and norm not in REPEAT_GLUE_BLOCKLIST:
                 repeat_phrases.add(norm)
 
-    return events, in_friction_window, in_repeat_window, repeat_phrases
+    return events, in_friction_window, in_repeat_window, repeat_phrases, earliest_ts
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=14, help="friction window in days; 0 = all time")
     ap.add_argument("--out", default=os.path.expanduser("~/.claude/sensei/events.json"))
     ap.add_argument("--projects-dir", default=PROJECTS_DIR, help="dir to scan (default ~/.claude/projects)")
+    ap.add_argument("--decisions", default=None, help="path to decisions.jsonl (default <dirname of --out>/decisions.jsonl)")
     args = ap.parse_args()
+    if args.decisions is None:
+        args.decisions = os.path.join(os.path.dirname(args.out), "decisions.jsonl")
 
+    now = dt.datetime.now(dt.timezone.utc)
     friction_cutoff = None
     repeat_cutoff = None
     if args.days > 0:
-        now = dt.datetime.now(dt.timezone.utc)
         friction_cutoff = now - dt.timedelta(days=args.days)
         repeat_cutoff = now - dt.timedelta(days=REPEAT_WINDOW_DAYS)
+
+    # effectiveness ledger (ADR-0016): anchors are derived once up front, then
+    # accumulated in the same per-file walk below — no second pass over transcripts.
+    anchors, _lookback_days = load_ledger_anchors(args.decisions, now=now)
+    for a in anchors:
+        a["is_compound"] = any(isinstance(c, dict) and c.get("kind") in ("tool", "glob") for c in a["trigger"])
+        a["pre_accept_friction"] = 0
+        a["current_friction"] = 0
+        a["current_opportunities"] = 0
 
     # main sessions only: <project>/<uuid>.jsonl — this glob already excludes
     # anything nested under <project>/<uuid>/subagents/*.jsonl
@@ -222,13 +426,16 @@ def main():
     sessions_scanned = 0
     repeat_sessions_total = 0
     phrase_sessions = {}  # normalized phrase -> set of (project, session)
+    earliest_ts_overall = None
 
     for fp in files:
         project = os.path.basename(os.path.dirname(fp))
         session = os.path.splitext(os.path.basename(fp))[0]
-        events, in_friction, in_repeat, phrases = mine_session(
-            fp, project, session, friction_cutoff, repeat_cutoff
+        events, in_friction, in_repeat, phrases, earliest_ts = mine_session(
+            fp, project, session, friction_cutoff, repeat_cutoff, anchors
         )
+        if earliest_ts is not None and (earliest_ts_overall is None or earliest_ts < earliest_ts_overall):
+            earliest_ts_overall = earliest_ts
         if in_friction or in_repeat:
             sessions_scanned += 1
         if in_friction:
@@ -267,6 +474,41 @@ def main():
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w") as f:
         json.dump(out, f, indent=2)
+
+    # Effectiveness ledger (ADR-0016): one row per anchor, recomputed from scratch each
+    # run (no cross-run accumulation) — written even with zero anchors so /sensei status
+    # can distinguish "ledger empty" from "ledger missing".
+    ledger_rows = []
+    for a in anchors:
+        fallback = False
+        baseline_seed = None
+        if not a["trigger"]:
+            standing = "not_measurable_yet"
+        elif a["days_since_accept"] < GRACE_DAYS:
+            standing = "not_measurable_yet"
+        elif earliest_ts_overall is not None and a["pre_accept_slice"][0] < earliest_ts_overall:
+            standing = "inconclusive"
+            fallback = True
+            baseline_seed = a["baseline"]
+        elif a["current_opportunities"] < MIN_OPPORTUNITIES:
+            standing = "inconclusive"
+        elif a["pre_accept_friction"] < MIN_BASELINE:
+            standing = "inconclusive"
+        elif a["current_friction"] <= math.floor(WORKING_DROP * a["pre_accept_friction"]):
+            standing = "working"
+        else:
+            standing = "not_working"
+        ledger_rows.append({
+            "key": a["key"], "standing": standing, "trigger_present": True,
+            "pre_accept_friction": a["pre_accept_friction"],
+            "current_friction": a["current_friction"],
+            "current_opportunities": a["current_opportunities"],
+            "days_since_accept": a["days_since_accept"],
+            "fallback": fallback, "baseline_seed": baseline_seed,
+        })
+    ledger_out = {"generated_at": generated_at, "rows": ledger_rows}
+    with open(os.path.join(os.path.dirname(args.out), "ledger.json"), "w") as f:
+        json.dump(ledger_out, f, indent=2)
 
     # Digest: a per-day, human-facing artifact whose mere presence proves the
     # nightly patrol ran (ADR-0014). Written here, not by the LLM stage, so it

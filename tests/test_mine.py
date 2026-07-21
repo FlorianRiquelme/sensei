@@ -4,13 +4,23 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(REPO_ROOT, "tests", "fixtures", "projects")
 MINE_PY = os.path.join(REPO_ROOT, "mine.py")
 
-def run_mine(projects_dir, out_path, days=0):
-    subprocess.run(
-        [sys.executable, MINE_PY, "--days", str(days), "--projects-dir", projects_dir, "--out", out_path],
-        check=True, capture_output=True, text=True,
-    )
+def run_mine(projects_dir, out_path, days=0, decisions_path=None):
+    cmd = [sys.executable, MINE_PY, "--days", str(days), "--projects-dir", projects_dir, "--out", out_path]
+    if decisions_path is not None:
+        cmd += ["--decisions", decisions_path]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
     with open(out_path) as f:
         return json.load(f)
+
+
+def ledger_path_for(out_path):
+    return os.path.join(os.path.dirname(out_path), "ledger.json")
+
+
+def write_decisions(path, decisions):
+    with open(path, "w") as f:
+        for d in decisions:
+            f.write(json.dumps(d) + "\n")
 
 def digest_path_for(out_path):
     return os.path.join(os.path.dirname(out_path), "digests", f"{dt.datetime.now().date().isoformat()}.json")
@@ -361,6 +371,486 @@ class TestMineDigest(unittest.TestCase):
         self.assertEqual(digest["events_total"], 0)
         self.assertEqual(digest["by_type"], {})
         self.assertEqual(digest["by_project"], {})
+
+
+# --- U2: trigger-matching primitives (PD1/PD3) -------------------------------------
+
+class TestTriggerMatching(unittest.TestCase):
+    def setUp(self):
+        self.m = load_mine_module()
+
+    def test_compound_trigger_matches_bash_with_keyword(self):
+        trigger = [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}]
+        self.assertTrue(self.m.is_opportunity(
+            trigger, tool_name="Bash", tool_input="ddev artisan migrate", user_text=""))
+
+    def test_compound_trigger_rejects_bash_without_keyword(self):
+        trigger = [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}]
+        self.assertFalse(self.m.is_opportunity(
+            trigger, tool_name="Bash", tool_input="ddev composer install", user_text=""))
+
+    def test_compound_trigger_rejects_keyword_on_other_tool(self):
+        trigger = [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}]
+        self.assertFalse(self.m.is_opportunity(
+            trigger, tool_name="Read", tool_input="run artisan migrate", user_text=""))
+
+    def test_tool_clause_is_exact_not_prefix(self):
+        trigger = [{"kind": "tool", "value": "Bash"}]
+        self.assertFalse(self.m.is_opportunity(
+            trigger, tool_name="BashOutput", tool_input="", user_text=""))
+
+    def test_glob_clause_matches_nested_path(self):
+        trigger = [{"kind": "glob", "value": "app/**/*.php"}]
+        self.assertTrue(self.m.is_opportunity(
+            trigger, tool_name="Edit", tool_input='{"file_path": "app/Models/User.php"}', user_text=""))
+
+    def test_glob_clause_rejects_other_path(self):
+        trigger = [{"kind": "glob", "value": "app/**/*.php"}]
+        self.assertFalse(self.m.is_opportunity(
+            trigger, tool_name="Edit", tool_input='{"file_path": "resources/x.php"}', user_text=""))
+
+    def test_pure_keyword_trigger_matches_user_text(self):
+        trigger = [{"kind": "keyword", "value": "ddev"}]
+        self.assertTrue(self.m.is_opportunity(
+            trigger, tool_name=None, tool_input="", user_text="please use ddev for this"))
+
+    def test_pure_keyword_trigger_ignores_tool_input(self):
+        # "ddev" only appears on the tool_input surface; a pure-keyword trigger must
+        # never read that surface (assistant/tool text is not a valid opportunity
+        # surface for a pure-keyword trigger).
+        trigger = [{"kind": "keyword", "value": "ddev"}]
+        self.assertFalse(self.m.is_opportunity(
+            trigger, tool_name="Bash", tool_input="ddev artisan migrate", user_text="looks fine"))
+
+    def test_empty_trigger_never_matches(self):
+        self.assertFalse(self.m.is_opportunity(
+            [], tool_name="Bash", tool_input="ddev artisan migrate", user_text="ddev"))
+
+    def test_malformed_clause_no_crash(self):
+        trigger = [{"value": "artisan"}]  # missing "kind"
+        self.assertFalse(self.m.is_opportunity(
+            trigger, tool_name="Bash", tool_input="ddev artisan migrate", user_text=""))
+
+
+# --- U3: decisions loader / anchor + slice derivation (PD4/PD6) --------------------
+
+class TestLedgerAnchors(unittest.TestCase):
+    def setUp(self):
+        self.m = load_mine_module()
+        self.now = dt.datetime.now(dt.timezone.utc)
+
+    def _date(self, days_ago):
+        return (self.now - dt.timedelta(days=days_ago)).strftime("%Y-%m-%d")
+
+    def test_single_anchor_slice_boundaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(path, [{
+                "date": self._date(40), "title": "t", "key": "k1", "verdict": "accepted",
+                "target": "x", "reason": "r", "reason_kind": "friction", "tier": "user",
+                "baseline": 3, "trigger": [{"kind": "keyword", "value": "artisan"}],
+            }])
+            anchors, lookback = self.m.load_ledger_anchors(path, now=self.now)
+
+        self.assertEqual(len(anchors), 1)
+        a = anchors[0]
+        expected_accept = dt.datetime.strptime(self._date(40), "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+        self.assertEqual(a["accept_date"], expected_accept)
+        self.assertEqual(a["pre_accept_slice"], (expected_accept - dt.timedelta(days=self.m.SLICE_DAYS), expected_accept))
+        self.assertGreaterEqual(a["days_since_accept"], 39)
+
+    def test_earliest_decision_wins_for_same_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(path, [
+                {"date": self._date(20), "title": "t", "key": "k1", "verdict": "accepted",
+                 "target": "x", "reason": "r", "reason_kind": "friction", "tier": "user",
+                 "baseline": 3, "trigger": [{"kind": "keyword", "value": "artisan"}]},
+                {"date": self._date(40), "title": "t", "key": "k1", "verdict": "accepted",
+                 "target": "x", "reason": "r", "reason_kind": "friction", "tier": "user",
+                 "baseline": 3, "trigger": [{"kind": "keyword", "value": "artisan"}]},
+            ])
+            anchors, _ = self.m.load_ledger_anchors(path, now=self.now)
+
+        self.assertEqual(len(anchors), 1)
+        self.assertEqual(anchors[0]["accept_date"].strftime("%Y-%m-%d"), self._date(40))
+
+    def test_hook_tier_or_missing_trigger_never_anchors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(path, [
+                {"date": self._date(40), "key": "hook-key", "verdict": "accepted",
+                 "tier": "hook", "trigger": [{"kind": "keyword", "value": "x"}]},
+                {"date": self._date(40), "key": "no-trigger-key", "verdict": "accepted", "tier": "user"},
+            ])
+            anchors, _ = self.m.load_ledger_anchors(path, now=self.now)
+
+        self.assertEqual(anchors, [])
+
+    def test_rejected_variants_never_anchor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(path, [
+                {"date": self._date(40), "key": "k1", "verdict": "rejected", "tier": "user",
+                 "trigger": [{"kind": "keyword", "value": "x"}]},
+                {"date": self._date(40), "key": "k2", "verdict": "reject-retry-narrower", "tier": "user",
+                 "trigger": [{"kind": "keyword", "value": "x"}]},
+                {"date": self._date(40), "key": "k3", "verdict": "reject-not-wanted", "tier": "user",
+                 "trigger": [{"kind": "keyword", "value": "x"}]},
+            ])
+            anchors, _ = self.m.load_ledger_anchors(path, now=self.now)
+
+        self.assertEqual(anchors, [])
+
+    def test_lookback_bounded_and_floored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(path, [{
+                "date": self._date(300), "key": "old-key", "verdict": "accepted", "tier": "user",
+                "baseline": 1, "trigger": [{"kind": "keyword", "value": "x"}],
+            }])
+            anchors, lookback = self.m.load_ledger_anchors(path, now=self.now)
+
+        self.assertEqual(lookback, self.m.MAX_LEDGER_LOOKBACK_DAYS)
+        self.assertGreaterEqual(lookback, self.m.REPEAT_WINDOW_DAYS)
+
+    def test_missing_decisions_file_no_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "decisions.jsonl")  # never written
+            anchors, lookback = self.m.load_ledger_anchors(path, now=self.now)
+
+        self.assertEqual(anchors, [])
+        self.assertEqual(lookback, self.m.REPEAT_WINDOW_DAYS)
+
+
+# --- U4: single-walk ledger accumulation + ledger.json emission (PD2/PD4) ----------
+
+def iso(d):
+    return d.isoformat().replace("+00:00", "Z")
+
+
+class TestLedgerIntegration(unittest.TestCase):
+    def setUp(self):
+        self.now = dt.datetime.now(dt.timezone.utc)
+
+    def _decision(self, key, days_ago_accepted, baseline=3):
+        return {
+            "date": (self.now - dt.timedelta(days=days_ago_accepted)).strftime("%Y-%m-%d"),
+            "title": "t", "key": key, "verdict": "accepted", "target": "x",
+            "reason": "r", "reason_kind": "friction", "tier": "user",
+            "baseline": baseline, "trigger": [{"kind": "keyword", "value": "artisan"}],
+        }
+
+    def _row(self, ledger, key):
+        rows = [r for r in ledger["rows"] if r["key"] == key]
+        self.assertEqual(len(rows), 1, f"expected exactly one row for {key}")
+        return rows[0]
+
+    def _filler(self, days_ago=60):
+        # a harmless record older than any anchor's pre_accept_slice start, so the
+        # earliest-record-read fallback (AE5) isn't spuriously triggered by tests that
+        # aren't exercising it.
+        return {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=days_ago)),
+                "message": {"role": "user", "content": "hello"}}
+
+    def test_ae1_working(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler()]
+            for d in (45, 44, 43, 42, 41):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, don't run artisan like that"}})
+            for d in (5, 4, 3):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "please run artisan migrate"}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("ae1", 40)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae1")
+        self.assertEqual(row["pre_accept_friction"], 5)
+        self.assertEqual(row["current_friction"], 0)
+        self.assertEqual(row["current_opportunities"], 3)
+        self.assertEqual(row["standing"], "working")
+        self.assertFalse(row["fallback"])
+
+    def test_ae1_working_compound_trigger_correction_friction(self):
+        # AE1's own narrative is a tool+keyword trigger ("ddev-prefix") measured via
+        # *corrections*, not denials. A compound opportunity is a tool_use block (PD3),
+        # which the transcript never links directly to a later correction — the human's
+        # next reply after the matching tool call is the deterministic proxy (mirrors
+        # how a denial is tied back via tool_use_id).
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler()]
+            for d in (50, 49, 48, 47, 46):
+                records.append({"type": "assistant", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "assistant", "content": [
+                                     {"type": "tool_use", "id": f"toolu_pre_{d}", "name": "Bash",
+                                      "input": {"command": "php artisan migrate"}},
+                                 ]}})
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, use ddev artisan instead"}})
+            for d in (5, 4, 3):
+                records.append({"type": "assistant", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "assistant", "content": [
+                                     {"type": "tool_use", "id": f"toolu_cur_{d}", "name": "Bash",
+                                      "input": {"command": "ddev artisan migrate"}},
+                                 ]}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [{
+                "date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                "title": "t", "key": "ae1-compound", "verdict": "accepted", "target": "x",
+                "baseline": 5,
+                "trigger": [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}],
+            }])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae1-compound")
+        self.assertEqual(row["pre_accept_friction"], 5)
+        self.assertEqual(row["current_friction"], 0)
+        self.assertEqual(row["current_opportunities"], 3)
+        self.assertEqual(row["standing"], "working")
+
+    def test_compound_trigger_denial_not_double_counted_by_followup_correction(self):
+        # A denied tool_use already earns friction credit via the tool_use_id link
+        # (existing denial handling) — a correction immediately following the deny
+        # ("no, use ddev instead") must not ALSO earn credit via the pending-reply proxy.
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            d = 5
+            ts = iso(self.now - dt.timedelta(days=d))
+            records = [
+                self._filler(),
+                {"type": "assistant", "timestamp": ts, "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "toolu_x", "name": "Bash", "input": {"command": "php artisan migrate"}},
+                ]}},
+                {"type": "user", "timestamp": ts, "message": {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_x", "content": "The user doesn't want to proceed."},
+                ]}},
+                {"type": "user", "timestamp": ts, "message": {"role": "user", "content": "no, use ddev instead"}},
+            ]
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [{
+                "date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                "title": "t", "key": "no-double-count", "verdict": "accepted", "target": "x",
+                "baseline": 5,
+                "trigger": [{"kind": "tool", "value": "Bash"}, {"kind": "keyword", "value": "artisan"}],
+            }])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "no-double-count")
+        self.assertEqual(row["current_friction"], 1)
+
+    def test_ae2_not_working(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler()]
+            for d in (45, 44, 43, 42):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, don't run artisan like that"}})
+            for d in (10, 8, 6, 4):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, don't run artisan like that"}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("ae2", 40)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae2")
+        self.assertEqual(row["pre_accept_friction"], 4)
+        self.assertEqual(row["current_friction"], 4)
+        self.assertEqual(row["standing"], "not_working")
+
+    def test_ae3_inconclusive_zero_opportunities_never_reads_working(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler()]
+            for d in (45, 44, 43, 42, 41):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, don't run artisan like that"}})
+            # current slice: no mention of the trigger keyword at all
+            records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=5)),
+                             "message": {"role": "user", "content": "looks good, ship it"}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("ae3", 40)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae3")
+        self.assertEqual(row["current_opportunities"], 0)
+        self.assertEqual(row["current_friction"], 0)
+        self.assertEqual(row["standing"], "inconclusive")
+
+    def test_ae4a_within_grace_period_not_measurable_yet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            write_session(proj_dir, "sess.jsonl", [])
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("ae4a", 5)])  # < GRACE_DAYS
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae4a")
+        self.assertEqual(row["standing"], "not_measurable_yet")
+
+    def test_ae4b_key_without_trigger_produces_no_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            write_session(proj_dir, "sess.jsonl", [])
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [{
+                "date": (self.now - dt.timedelta(days=40)).strftime("%Y-%m-%d"),
+                "key": "ae4b", "verdict": "accepted", "tier": "user",
+            }])  # no "trigger" field
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        self.assertEqual([r for r in ledger["rows"] if r["key"] == "ae4b"], [])
+
+    def test_ae5_fallback_when_pre_accept_slice_predates_available_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            # only record on disk is recent; the anchor's pre-accept slice (~100+14
+            # days ago) predates it entirely.
+            write_session(proj_dir, "sess.jsonl", [
+                {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=5)),
+                 "message": {"role": "user", "content": "please run artisan migrate"}},
+            ])
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("ae5", 100, baseline=7)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "ae5")
+        self.assertEqual(row["standing"], "inconclusive")
+        self.assertTrue(row["fallback"])
+        self.assertEqual(row["baseline_seed"], 7)
+
+    def test_small_n_current_opportunities_below_minimum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler()]
+            for d in (45, 44, 43, 42, 41):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "no, don't run artisan like that"}})
+            for d in (5, 3):  # only 2 current opportunities, below MIN_OPPORTUNITIES
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "please run artisan migrate"}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("small-n-opp", 40)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "small-n-opp")
+        self.assertEqual(row["current_opportunities"], 2)
+        self.assertEqual(row["standing"], "inconclusive")
+
+    def test_small_n_pre_accept_friction_below_minimum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            records = [self._filler(), {"type": "user", "timestamp": iso(self.now - dt.timedelta(days=45)),
+                        "message": {"role": "user", "content": "no, don't run artisan like that"}}]
+            for d in (5, 4, 3):
+                records.append({"type": "user", "timestamp": iso(self.now - dt.timedelta(days=d)),
+                                 "message": {"role": "user", "content": "please run artisan migrate"}})
+            write_session(proj_dir, "sess.jsonl", records)
+
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("small-n-baseline", 40)])
+
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0, decisions_path=decisions_path)
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        row = self._row(ledger, "small-n-baseline")
+        self.assertEqual(row["pre_accept_friction"], 1)
+        self.assertEqual(row["current_opportunities"], 3)
+        self.assertEqual(row["standing"], "inconclusive")
+
+    def test_ledger_written_with_empty_rows_when_no_anchors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            out_path = os.path.join(tmp, "events.json")
+            run_mine(os.path.join(tmp, "projects"), out_path, days=0)  # no --decisions override
+            with open(ledger_path_for(out_path)) as f:
+                ledger = json.load(f)
+
+        self.assertIn("generated_at", ledger)
+        self.assertEqual(ledger["rows"], [])
+
+    def test_regression_fixtures_unchanged_with_anchors_active(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            decisions_path = os.path.join(tmp, "decisions.jsonl")
+            write_decisions(decisions_path, [self._decision("regression-key", 40)])
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(FIXTURES, out_path, days=0, decisions_path=decisions_path)
+
+        self.assertEqual(data["sessions_scanned"], 2)
+        by_type = {}
+        for e in data["events"]:
+            by_type.setdefault(e["type"], []).append(e)
+        self.assertEqual(len(by_type.get("correction", [])), 1)
+        self.assertEqual(len(by_type.get("denial", [])), 1)
+        self.assertEqual(len(by_type.get("interrupt", [])), 1)
+        self.assertEqual(len(data["events"]), 3)
 
 
 if __name__ == "__main__":
