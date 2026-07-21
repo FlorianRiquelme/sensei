@@ -91,26 +91,37 @@ def compute_pending(proposals_dir, decided_keys):
         return {"degraded": False, "count": len(pending_keys), "oldest": oldest}
     return None
 
+def _int(v):
+    """Coerce a `_meta` value to int, defaulting to 0 — a hand-edited or corrupted digest
+    may carry a non-numeric value, and this runs on every session start (never raise)."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+def _plural(n, word):
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
 def leak_warning(meta):
     """Compact summary of the miner's own silent drops (GitHub #18), or None below
-    threshold. `meta` is a digest's `_meta` block (may be missing/partial — read
-    defensively so a pre-existing digest without `_meta` yields no warning, never
-    an error)."""
-    total_capped = meta.get("total_capped", 0)
-    capped_sessions = meta.get("capped_sessions", 0)
-    unreadable_files = meta.get("unreadable_files", 0)
-    parse_errors = meta.get("parse_errors", 0)
+    threshold. `meta` is a digest's `_meta` block (may be missing/partial/corrupt — read
+    defensively so a pre-existing digest without `_meta`, or one with non-numeric values,
+    yields no warning, never an error)."""
+    total_capped = _int(meta.get("total_capped", 0))
+    capped_sessions = _int(meta.get("capped_sessions", 0))
+    unreadable_files = _int(meta.get("unreadable_files", 0))
+    parse_errors = _int(meta.get("parse_errors", 0))
 
     if not (total_capped > 0 or capped_sessions > 0 or unreadable_files > 0 or parse_errors >= PARSE_ERRORS_FLOOR):
         return None
 
     parts = []
     if capped_sessions > 0:
-        parts.append(f"{capped_sessions} session(s) hit the per-session cap")
+        parts.append(f"{_plural(capped_sessions, 'session')} hit the per-session cap")
     if total_capped > 0:
-        parts.append(f"{total_capped} events dropped past the global cap")
+        parts.append(f"{_plural(total_capped, 'event')} dropped past the global cap")
     if unreadable_files > 0:
-        parts.append(f"{unreadable_files} unreadable file(s)")
+        parts.append(_plural(unreadable_files, "unreadable file"))
     if parse_errors >= PARSE_ERRORS_FLOOR:
         parts.append(f"{parse_errors} parse errors")
     return ", ".join(parts)

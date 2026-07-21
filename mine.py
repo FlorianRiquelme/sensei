@@ -215,6 +215,20 @@ def mine_session(fp, project, session, friction_cutoff, repeat_cutoff):
     meta = {"parse_errors": parse_errors, "capped": session_capped, "unreadable": False}
     return events, in_friction_window, in_repeat_window, repeat_phrases, meta
 
+def within_window(fp, cutoff):
+    """True if fp was last modified within the scan window (or cutoff is None = all time).
+    Scopes the miner's own drop counts (parse_errors/unreadable_files, GitHub #18) to the
+    window it reports on: a malformed line has no timestamp and an unreadable file is never
+    read, so without an mtime gate ancient history would accumulate forever and permanently
+    trip the nudge. Favors recall on stat failure (ADR-0004): when mtime is unknowable, count it."""
+    if cutoff is None:
+        return True
+    try:
+        mtime = dt.datetime.fromtimestamp(os.path.getmtime(fp), dt.timezone.utc)
+    except OSError:
+        return True
+    return mtime >= cutoff
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=14, help="friction window in days; 0 = all time")
@@ -228,6 +242,8 @@ def main():
         now = dt.datetime.now(dt.timezone.utc)
         friction_cutoff = now - dt.timedelta(days=args.days)
         repeat_cutoff = now - dt.timedelta(days=REPEAT_WINDOW_DAYS)
+    # widest window the scan considers, for scoping the drop counts (GitHub #18)
+    scan_cutoff = min(friction_cutoff, repeat_cutoff) if friction_cutoff else None
 
     # main sessions only: <project>/<uuid>.jsonl — this glob already excludes
     # anything nested under <project>/<uuid>/subagents/*.jsonl
@@ -247,10 +263,14 @@ def main():
         events, in_friction, in_repeat, phrases, meta = mine_session(
             fp, project, session, friction_cutoff, repeat_cutoff
         )
-        parse_errors_total += meta["parse_errors"]
+        # parse_errors/unreadable have no in-window timestamp of their own, so scope them
+        # by file mtime (GitHub #18); capped is already window-scoped via friction_ok.
+        recent = within_window(fp, scan_cutoff)
+        if recent:
+            parse_errors_total += meta["parse_errors"]
         if meta["capped"]:
             capped_sessions += 1
-        if meta["unreadable"]:
+        if meta["unreadable"] and recent:
             unreadable_files += 1
         if in_friction or in_repeat:
             sessions_scanned += 1

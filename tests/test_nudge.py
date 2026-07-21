@@ -126,6 +126,19 @@ class TestNudge(unittest.TestCase):
             self.assertNotIn("missing signal", payload["systemMessage"])
             self.assertIn("scanned 6 sessions", payload["systemMessage"])
 
+    def test_leak_warning_corrupt_meta_no_crash(self):
+        # a hand-edited/corrupted digest with non-numeric _meta values must not crash the
+        # nudge (which runs on every session start) nor suppress the base line.
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", sessions_scanned=6, events_total=14, meta={
+                "parse_errors": "x", "capped_sessions": None, "total_capped": "lots", "unreadable_files": [],
+            })
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertNotIn("missing signal", payload["systemMessage"])
+            self.assertIn("scanned 6 sessions", payload["systemMessage"])
+
     def test_pending_line_reports_count_and_oldest(self):
         with tempfile.TemporaryDirectory() as tmp:
             now = dt.datetime(2026, 7, 19, 9, 0, 0)  # Friday

@@ -340,6 +340,35 @@ class TestMineDynamic(unittest.TestCase):
         self.assertEqual(len(data["events"]), mine_mod.MAX_TOTAL)
         self.assertEqual(data["_meta"]["total_capped"], produced - mine_mod.MAX_TOTAL)
 
+    def test_meta_parse_errors_ignores_out_of_window_file(self):
+        # a file whose malformed lines are all older than the scan window must not count —
+        # otherwise ancient transcript noise permanently trips the nudge (GitHub #18).
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            fp = os.path.join(proj_dir, "old.jsonl")
+            with open(fp, "w") as f:
+                f.write("not valid json\n" * 12)
+            old = (dt.datetime.now() - dt.timedelta(days=400)).timestamp()
+            os.utime(fp, (old, old))
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=14)
+
+        self.assertEqual(data["_meta"]["parse_errors"], 0)
+
+    def test_meta_unreadable_ignores_out_of_window_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proj_dir = os.path.join(tmp, "projects", "proj")
+            os.makedirs(proj_dir)
+            unreadable = os.path.join(proj_dir, "old.jsonl")
+            os.makedirs(unreadable)  # a directory: open() raises IsADirectoryError (OSError)
+            old = (dt.datetime.now() - dt.timedelta(days=400)).timestamp()
+            os.utime(unreadable, (old, old))
+            out_path = os.path.join(tmp, "events.json")
+            data = run_mine(os.path.join(tmp, "projects"), out_path, days=14)
+
+        self.assertEqual(data["_meta"]["unreadable_files"], 0)
+
     # --- U3: `repeat` event type with structural thinning (ADR-0011) ------------------
 
     def test_repeat_emitted_for_phrase_across_three_sessions(self):
