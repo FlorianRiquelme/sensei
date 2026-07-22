@@ -67,6 +67,10 @@ _Avoid_: report, summary, log
 The SessionStart line that carries the Digest's payload into the session: a heartbeat on quiet nights, a pending-proposal pointer, or a loud "nightly did not run". The sole discovery surface. Fires once per calendar day in the healthy state (Digest present); the failure line is exempt and repeats every session until the Digest appears or the day turns over — a broken patrol stays loud.
 _Avoid_: notification, banner
 
+**Proposal index**:
+The dated, LLM-written structured list (`proposals/YYYY-MM-DD.json`) of the Proposal key and kind of every proposal in a night's `.md` — written every run, empty (`{"proposals": []}`) on quiet nights. The Nudge's structured contract for counting pending proposals, read via `load_json` instead of regexing the `.md`. Unlike the Digest, it is an **LLM-stage** artifact with no deterministic-presence guarantee: it inherits the `.md`'s durability, so the run-happened signal stays the Digest, never the index (ADR-0017). A missing or malformed index for a day the `.md` exists is *degraded* — the loud "run /sensei review" state.
+_Avoid_: sidecar, manifest
+
 **Baseline**:
 The pattern's pre-acceptance event count, stored on a Decision at accept time. A **fallback seed** for the Effectiveness ledger, not its primary reading: the ledger re-derives the real pre-acceptance number with the rule's own Trigger (same instrument on both sides), and falls back to this stored count only when the pre-accept transcripts have aged out of the read window (ADR-0016).
 _Avoid_: receipt (the receipt is the future report computed from a Baseline)

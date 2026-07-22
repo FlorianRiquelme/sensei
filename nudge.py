@@ -5,7 +5,7 @@ systemMessage field: a heartbeat, a pending-proposals reminder, or a loud "night
 did not run" warning. Lean and stdlib-only — this runs synchronously and blocks the
 prompt on every session start.
 """
-import argparse, glob, json, os, re, sys, datetime as dt
+import argparse, glob, json, os, sys, datetime as dt
 
 NIGHTLY_HOUR, NIGHTLY_MINUTE = 5, 30  # mirrors sh.sensei.plist.template's StartCalendarInterval
 
@@ -13,8 +13,6 @@ NIGHTLY_HOUR, NIGHTLY_MINUTE = 5, 30  # mirrors sh.sensei.plist.template's Start
 # flag on first occurrence; a handful of malformed lines is normal transcript noise, so
 # gate parse_errors behind a small floor. Tune here if real-world digests show it's off.
 PARSE_ERRORS_FLOOR = 10
-
-KEY_RE = re.compile(r"^- \*\*Key:\*\*\s*(.+)$", re.MULTILINE)
 
 def expected_date(now):
     boundary = now.replace(hour=NIGHTLY_HOUR, minute=NIGHTLY_MINUTE, second=0, microsecond=0)
@@ -57,38 +55,30 @@ def compute_pending(proposals_dir, decided_keys):
     """Returns None (nothing pending), or a dict:
     {"degraded": False, "count": N, "oldest": "YYYY-MM-DD"} or
     {"degraded": True, "oldest": "YYYY-MM-DD"}.
-    Any parse miss errs toward reporting pending (over-remind, never under-remind)."""
-    files = sorted(glob.glob(os.path.join(proposals_dir, "*.md")))
-    pending_keys = []  # (date_str, key)
-    degraded_dates = []
-
-    for fp in files:
-        date_str = os.path.splitext(os.path.basename(fp))[0]
-        try:
-            text = open(fp).read()
-        except OSError:
+    Reads the structured Proposal index (proposals/{date}.json) only. A run-day is any date
+    with a .md OR .json in proposals/ (union-glob) — the sidecar is authoritative; a
+    missing/malformed sidecar (partial LLM write, or a legacy .md-only day) is degraded. An
+    empty "proposals": [] is healthy, nothing pending."""
+    stems = sorted({
+        os.path.splitext(os.path.basename(p))[0]
+        for p in glob.glob(os.path.join(proposals_dir, "*.md"))
+              + glob.glob(os.path.join(proposals_dir, "*.json"))
+    })
+    pending, degraded = [], []
+    for date_str in stems:
+        idx = load_json(os.path.join(proposals_dir, f"{date_str}.json"))
+        if not isinstance(idx, dict) or not isinstance(idx.get("proposals"), list):
+            degraded.append(date_str)
             continue
-        stripped = text.strip()
-        if stripped.startswith("# ") and "\n" not in stripped:
-            continue  # zero-proposal one-line placeholder file
+        for p in idx["proposals"]:
+            key = p.get("key") if isinstance(p, dict) else None
+            if isinstance(key, str) and key and key not in decided_keys:
+                pending.append(date_str)
 
-        keys = [k.strip() for k in KEY_RE.findall(text)]
-        blocks = [b for b in text.split("---") if b.strip()]
-        if not keys:
-            degraded_dates.append(date_str)
-            continue
-        if len(keys) < len(blocks):
-            degraded_dates.append(date_str)
-        for key in keys:
-            if key not in decided_keys:
-                pending_keys.append((date_str, key))
-
-    if degraded_dates:
-        oldest = min(degraded_dates + [d for d, _ in pending_keys])
-        return {"degraded": True, "oldest": oldest}
-    if pending_keys:
-        oldest = min(d for d, _ in pending_keys)
-        return {"degraded": False, "count": len(pending_keys), "oldest": oldest}
+    if degraded:
+        return {"degraded": True, "oldest": min(degraded + pending)}
+    if pending:
+        return {"degraded": False, "count": len(pending), "oldest": min(pending)}
     return None
 
 def _int(v):

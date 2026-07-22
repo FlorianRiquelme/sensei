@@ -52,7 +52,10 @@ State lives under `~/.claude/sensei/`:
   an **accepted** prose/habit-rule proposal's `Trigger` line, when the proposal had one (see
   nightly step 4 and review step 3); its absence is the default and never affects cooldown,
   dedup, or escalation — those key on the stable `key` field only.
-- `proposals/YYYY-MM-DD.md` — one report per nightly run.
+- `proposals/YYYY-MM-DD.md` — one report per nightly run (only on nights with ≥1 qualifying
+  proposal).
+- `proposals/YYYY-MM-DD.json` — the Proposal index, written every run (see step 5); the Nudge
+  reads this, not the `.md`.
 - `logs/nightly.log` — launchd stdout/stderr.
 
 ## Mode: nightly
@@ -130,9 +133,9 @@ it produces a ready artifact but never writes it.
        signature of the rule's *intent* (e.g. `~/.claude/CLAUDE.md::ddev-prefix-artisan`). Two
        proposals that would edit the same rule must produce the same key even if their titles
        differ. This is what step 2 matches against and what review records in `decisions.jsonl`.
-       Emit the key as its own line, exactly: `- **Key:** <target-file>::<slug>` — this literal
-       format is a parse contract the session nudge depends on, and every proposal shape below
-       emits it.
+       Emit the key as its own line, exactly: `- **Key:** <target-file>::<slug>` — this is a
+       review + human field, mirrored into the Proposal index by step 5; every proposal shape
+       below emits it.
      - **Evidence** — 2–3 verbatim quotes from `user_text` / `assistant_context`, each tagged
        with its `project`.
      - **Supporting events** — the qualifying cluster's event count (the size already computed
@@ -158,7 +161,8 @@ it produces a ready artifact but never writes it.
    - **Hook proposal** (escalation, from step 2's exception) — a pattern already covered by an
      accepted rule but still qualifying past the grace period escalates instead of being skipped.
      Keep the **same `key`** as the original accepted decision (same rule, hardened — not a new
-     rule), still emitted as its own `- **Key:**` line per the parse contract above; set
+     rule), still emitted as its own `- **Key:**` line (mirrored into the Proposal index by step
+     5, same as the other proposal shapes); set
      **`target`** to the hook's install path (e.g. `~/.claude/settings.json` or a
      project-scoped `.claude/settings.json`). Review, when this proposal is accepted, must record
      `tier: "hook"` on the decision line (step 3) — that's what lets a future run's terminal check
@@ -174,10 +178,21 @@ it produces a ready artifact but never writes it.
      - Before drafting, **read the existing hooks config** and prefer **extending** an existing
        hook over adding a new entry; **surface the current hook count** in the proposal so the
        human can weigh hook-bloat. No hard ceiling — this is a heads-up, not a gate.
-5. Write `~/.claude/sensei/proposals/YYYY-MM-DD.md` (today's date) with every qualifying
-   proposal in the format above, separated by `---`. Label each proposal's kind (prose /
-   habit-rule / hook) so review knows how to handle it. If zero patterns qualified, write a
-   one-line file: `# YYYY-MM-DD — nothing today (N events scanned, 0 qualifying patterns)`.
+5. If any patterns qualified, write `~/.claude/sensei/proposals/YYYY-MM-DD.md` (today's date)
+   with every qualifying proposal in the format above, separated by `---`. Label each proposal's
+   kind (prose / habit-rule / hook) so review knows how to handle it.
+
+   Then, **after** the `.md` (its ordering is fixed: `.md` first, then `.json` — never the
+   reverse, since the index only points into the `.md`), write the Proposal index
+   `~/.claude/sensei/proposals/YYYY-MM-DD.json`:
+   ```json
+   {"proposals": [{"key": "<key>", "kind": "prose|habit-rule|hook"}, ...]}
+   ```
+   One entry per proposal just emitted, mirroring its `- **Key:**` line and kind label. No
+   `date` field (redundant with the filename).
+
+   If zero patterns qualified, write **only** the index, `{"proposals": []}`, and no `.md` — the
+   Digest is the proof-of-patrol, not a placeholder file.
 
 ## Mode: review
 
