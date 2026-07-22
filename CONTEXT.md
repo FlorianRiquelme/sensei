@@ -68,7 +68,7 @@ The SessionStart line that carries the Digest's payload into the session: a hear
 _Avoid_: notification, banner
 
 **Proposal index**:
-The dated, LLM-written structured list (`proposals/YYYY-MM-DD.json`) of the Proposal key and kind of every proposal in a night's `.md` — written every run, empty (`{"proposals": []}`) on quiet nights. The Nudge's structured contract for counting pending proposals, read via `load_json` instead of regexing the `.md`. Unlike the Digest, it is an **LLM-stage** artifact with no deterministic-presence guarantee: it inherits the `.md`'s durability, so the run-happened signal stays the Digest, never the index (ADR-0016). A missing or malformed index for a day the `.md` exists is *degraded* — the loud "run /sensei review" state.
+The dated, LLM-written structured list (`proposals/YYYY-MM-DD.json`) of the Proposal key and kind of every proposal in a night's `.md` — written every run, empty (`{"proposals": []}`) on quiet nights. The Nudge's structured contract for counting pending proposals, read via `load_json` instead of regexing the `.md`. Unlike the Digest, it is an **LLM-stage** artifact with no deterministic-presence guarantee: it inherits the `.md`'s durability, so the run-happened signal stays the Digest, never the index (ADR-0017). A missing or malformed index for a day the `.md` exists is *degraded* — the loud "run /sensei review" state.
 _Avoid_: sidecar, manifest
 
 **Baseline**:

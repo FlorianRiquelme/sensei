@@ -172,7 +172,7 @@ a concern — they are cleaned up by hand once, pre-release; see Migration.)
   **+** proposals-degraded → the loud "run /sensei review" line — correct: the miner ran, the LLM
   stage may have broken, the user is pointed at review.
 - **ADR-0014** (Digest is a *deterministic miner* artifact): **not extended literally** — see the
-  correction above. **ADR-0016 written** (`/grill-with-docs`) to record the decision that *an
+  correction above. **ADR-0017 written** (`/grill-with-docs`) to record the decision that *an
   LLM-stage structured Proposal index is acceptable for parsing pending state, while the
   run-happened signal stays the miner's Digest.* A back-pointer was added to ADR-0014 delimiting
   the two artifacts, and CONTEXT.md gained a **Proposal index** glossary term.
@@ -200,7 +200,7 @@ distribution concern is dropped** — it does not apply pre-release.
 - [x] Confirm the Nudge can drop `KEY_RE`, the `---` split, and the placeholder/degraded logic —
   yes; degraded's structured mapping enumerated above.
 - [x] Verify no conflict with ADR-0002 / 0014 / 0015; note whether a new ADR is warranted — done;
-  0002 & 0015 untouched, 0014 not literally extended, **ADR-0016 written**.
+  0002 & 0015 untouched, 0014 not literally extended, **ADR-0017 written**.
 - [x] Migration/compat note for old `.md`-only days — above (no in-code path; manual cleanup).
 
 ## Outstanding questions — resolved by `/grill-with-docs`
@@ -210,7 +210,7 @@ distribution concern is dropped** — it does not apply pre-release.
    skips already-decided proposals by key, reading the key from the `.md`. Dropping it would force
    review to correlate index entries back to `.md` blocks (the fuzzy matching we're deleting).
    Byte-exact rigidity relaxed; step 5 mirrors keys into the index. (Scope-in #3.)
-2. **Write the new ADR?** → **YES, ADR-0016 written.** Clears all three `domain-modeling` bars
+2. **Write the new ADR?** → **YES, ADR-0017 written.** Clears all three `domain-modeling` bars
    (hard to reverse, surprising vs ADR-0014, real trade-off). Records the LLM-stage-index decision
    and that the run-happened signal stays the miner's Digest.
 3. **Drop the placeholder `.md`?** → **DROP.** Quiet nights write only `{"proposals": []}`. The
@@ -267,7 +267,7 @@ shape is **unchanged**, so `run()` (nudge.py:120–135) needs no edits. The spik
 - **Goal:** The nightly LLM stage writes `proposals/YYYY-MM-DD.json` every run, `.md` first then
   `.json`, and stops writing the placeholder `.md` on quiet nights. Re-point the `- **Key:**` note
   off the retired nudge-parse contract.
-- **Requirements:** Scope-in #1, #3; Outstanding-questions #1, #3; ADR-0016 (invariants:
+- **Requirements:** Scope-in #1, #3; Outstanding-questions #1, #3; ADR-0017 (invariants:
   `.md`-first-then-`.json`, `- **Key:**` line stays/re-pointed, quiet nights write only the index).
 - **Dependencies:** none.
 - **Files:** `skill/SKILL.md`.
@@ -289,7 +289,7 @@ shape is **unchanged**, so `run()` (nudge.py:120–135) needs no edits. The spik
      load-bearing (its remaining reader is an LLM/review, not a regex). Keep the line itself and the
      "every proposal shape emits it" requirement.
 - **Patterns to follow:** existing step-5 prose voice; the index shape in *Index schema (spike)*
-  above; ADR-0016 "Invariants this decision relies on".
+  above; ADR-0017 "Invariants this decision relies on".
 - **Test scenarios:** `Test expectation: none — SKILL.md is LLM-facing instruction prose, not
   executable code (ADR-0002: nightly proposes, the LLM authors the artifacts). Correctness of the
   writer is exercised indirectly by U3's reader tests over the shapes it produces.`
@@ -301,7 +301,7 @@ shape is **unchanged**, so `run()` (nudge.py:120–135) needs no edits. The spik
 
 - **Goal:** `nudge.py` reads pending state from the structured index only; all markdown-parsing
   logic is deleted; return shape and `run()` are unchanged.
-- **Requirements:** Scope-in #2; "Degraded" mapping; ADR-0016 Consequence.
+- **Requirements:** Scope-in #2; "Degraded" mapping; ADR-0017 Consequence.
 - **Dependencies:** none (pairs with U1 — U1 defines the artifact U2 reads, but no code dependency).
 - **Files:** `nudge.py`.
 - **Approach:**
@@ -369,8 +369,8 @@ shape is **unchanged**, so `run()` (nudge.py:120–135) needs no edits. The spik
 
 - **Goal:** After the reader switches to the index, no legacy `.md`-only day remains in the
   maintainer's `~/.claude/sensei/proposals/` to false-alarm as degraded. **No in-code migration** —
-  this is the deliberate manual step ADR-0016 sanctions.
-- **Requirements:** Migration / compatibility; ADR-0016 Consequence (no compatibility branch).
+  this is the deliberate manual step ADR-0017 sanctions.
+- **Requirements:** Migration / compatibility; ADR-0017 Consequence (no compatibility branch).
 - **Dependencies:** U1, U2 (do this only once the new writer/reader are installed).
 - **Files:** none in-repo. Operates on **live user state** — `~/.claude/sensei/proposals/*.md`
   (currently 14 files: `2026-07-09.md` … `2026-07-22.md`).
@@ -424,5 +424,5 @@ order: **U1 + U2 → U3 → (install) → U4.**
   suite green.
 - [x] Verification Contract's automated + static + manual-smoke checks pass.
 - [x] U4 — legacy `.md`-only days cleaned up by hand after install; no spurious degraded nudge.
-- [x] (Already done in the grill — verify only, do not redo: ADR-0016 exists, ADR-0014 back-pointer
+- [x] (Already done in the grill — verify only, do not redo: ADR-0017 exists, ADR-0014 back-pointer
   present, CONTEXT.md "Proposal index" term present.)
