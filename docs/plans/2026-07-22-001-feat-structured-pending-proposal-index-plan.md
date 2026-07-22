@@ -1,8 +1,13 @@
 ---
 artifact_contract: ce-unified-plan/v1
-artifact_readiness: requirements-only
+artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
+execution: code
 ---
+
+<!-- Product Contract preservation: unchanged. ce-plan enriched this requirements-only
+     artifact in place to implementation-ready (Planning Contract + Implementation Units +
+     Verification + Definition of Done appended below); no R-IDs or product scope altered. -->
 
 # Structured Pending-Proposal Index - Plan
 
@@ -219,3 +224,205 @@ distribution concern is dropped** — it does not apply pre-release.
 - **Union-glob kept** — re-justified as partial-write insurance, not legacy handling.
 - **`.md`-first-then-`.json` ordering** locked as an invariant. (Scope-in #3.)
 - **Schema: `date` dropped, `kind` kept.** (Index schema.)
+
+---
+
+## Planning Contract (HOW)
+
+*Enriched by `ce-plan` from the requirements above. The Product Contract is unchanged; this
+section adds the implementation shape, sequencing, and verification. Plan depth: **Standard** —
+well-bounded, zero surviving ambiguity (the grill locked every decision), touches the announcement
+surface + tests.*
+
+### Ship path (verify before assuming edits take effect)
+
+`install.sh` copies **`nudge.py`** to `~/.claude/skills/sensei/nudge.py` (install.sh:18) and wires
+the SessionStart hook to `$PYTHON3 $SKILLS_DIR/nudge.py` (install.sh:29). `skill/SKILL.md` and
+`mine.py` ship the same way (ADR-0009). **Consequence:** editing `nudge.py` or `skill/SKILL.md` in
+the repo is inert until `./install.sh` is re-run — a `/sensei nightly` test before re-install
+exercises the stale installed copy. This is confirmed, not assumed: `nudge.py` is a first-class
+install artifact, so the reader-side edit ships correctly once installed.
+
+### Reader branch logic (the collapsed `compute_pending`)
+
+Per-date decision the implementer and test author must both honor. `stem` = a date with a `.md`
+**or** `.json` in `proposals/` (union-glob):
+
+| `.json` index for the date | Result for that date |
+|---|---|
+| missing (only `.md` present) | **degraded** — partial LLM write or legacy `.md`-only day |
+| present but not `{"proposals": [...]}` (malformed / bad JSON) | **degraded** |
+| valid, `proposals` non-empty, ≥1 key not in `decided_keys` | **pending** (counts toward `count`) |
+| valid, `proposals` empty **or** every key already decided | contributes nothing |
+
+Aggregate: any degraded date ⇒ `{"degraded": True, "oldest": min(degraded + pending)}`; else any
+pending ⇒ `{"degraded": False, "count": len(pending), "oldest": min(pending)}`; else `None`. Return
+shape is **unchanged**, so `run()` (nudge.py:120–135) needs no edits. The spike in *Collapsed
+`compute_pending`* above is the reference implementation.
+
+### Implementation Units
+
+#### U1. SKILL.md step 5 — LLM-stage index-write contract
+
+- **Goal:** The nightly LLM stage writes `proposals/YYYY-MM-DD.json` every run, `.md` first then
+  `.json`, and stops writing the placeholder `.md` on quiet nights. Re-point the `- **Key:**` note
+  off the retired nudge-parse contract.
+- **Requirements:** Scope-in #1, #3; Outstanding-questions #1, #3; ADR-0016 (invariants:
+  `.md`-first-then-`.json`, `- **Key:**` line stays/re-pointed, quiet nights write only the index).
+- **Dependencies:** none.
+- **Files:** `skill/SKILL.md`.
+- **Approach:**
+  1. **Step 5 (skill/SKILL.md:153–156)** — after the existing "Write `…/YYYY-MM-DD.md`" instruction,
+     add: write the index `~/.claude/sensei/proposals/YYYY-MM-DD.json` as
+     `{"proposals": [{"key": "<key>", "kind": "prose|habit-rule|hook"}, …]}`, one entry per proposal
+     just emitted, mirroring each proposal's `- **Key:**` and its kind label. **No `date` field**
+     (redundant with the filename). State the ordering invariant explicitly: **the `.md` is written
+     first (final action of drafting proposals), then the `.json`** — never the reverse; the index
+     only points into the `.md`.
+  2. **Retire the placeholder `.md`** — replace the "If zero patterns qualified, write a one-line
+     file: `# … nothing today …`" instruction with: on a zero-qualifying night, write **only**
+     `{"proposals": []}` and **no** `.md`. (The Digest is the proof-of-patrol; a placeholder `.md`
+     whose index write failed would false-alarm as degraded under the union-glob.)
+  3. **Re-point the `- **Key:**` note (skill/SKILL.md:117–119)** — replace "this literal format is a
+     parse contract the session nudge depends on" with wording that the key is now a **review +
+     human field, mirrored into the index** by step 5; its byte-exact rigidity is no longer
+     load-bearing (its remaining reader is an LLM/review, not a regex). Keep the line itself and the
+     "every proposal shape emits it" requirement.
+- **Patterns to follow:** existing step-5 prose voice; the index shape in *Index schema (spike)*
+  above; ADR-0016 "Invariants this decision relies on".
+- **Test scenarios:** `Test expectation: none — SKILL.md is LLM-facing instruction prose, not
+  executable code (ADR-0002: nightly proposes, the LLM authors the artifacts). Correctness of the
+  writer is exercised indirectly by U3's reader tests over the shapes it produces.`
+- **Verification:** step 5 names the `.json` index write, the `.md`-first ordering, and the
+  no-placeholder quiet-night rule; the `- **Key:**` note no longer claims a nudge parse contract;
+  no other step references `KEY_RE` or markdown parsing.
+
+#### U2. Collapse `compute_pending` to read the index
+
+- **Goal:** `nudge.py` reads pending state from the structured index only; all markdown-parsing
+  logic is deleted; return shape and `run()` are unchanged.
+- **Requirements:** Scope-in #2; "Degraded" mapping; ADR-0016 Consequence.
+- **Dependencies:** none (pairs with U1 — U1 defines the artifact U2 reads, but no code dependency).
+- **Files:** `nudge.py`.
+- **Approach:**
+  - Delete `KEY_RE` (nudge.py:12) and remove the now-orphaned **`re`** from the import line
+    (nudge.py:8) — `re` has no other use in the file (verified). This is a required orphan cleanup,
+    not a tangential edit.
+  - Replace the `compute_pending` body (nudge.py:51–87) with the index-reading implementation from
+    the *Collapsed `compute_pending` (spike)* above: union-glob of `*.md` + `*.json` → per-date
+    `load_json` of `{date}.json` → missing/malformed ⇒ degraded, valid ⇒ count undecided keys.
+    Reuse the existing module-level `load_json` (nudge.py:20). Update the docstring to describe the
+    index-read behavior.
+  - Delete `text.split("---")`, the one-line placeholder skip, and the `len(keys) < len(blocks)`
+    heuristic — they have no counterpart in the new body.
+  - **Do not touch** `run()`, `load_json`, `load_decided_keys`, `emit`, `expected_date`, or `main`.
+- **Patterns to follow:** the reference spike; the existing `load_json`-based reads elsewhere in
+  `nudge.py` (digest at :98, this stays the model for degraded/malformed → `None` handling).
+- **Test scenarios:** covered by U3 (behavior lives in `compute_pending`; U3 drives it through the
+  `run()` subprocess harness). This unit's own check is that the deleted symbols are gone and the
+  module still imports.
+- **Verification:** `grep -n 'KEY_RE\|split("---")\|len(keys)\|\bre\b' nudge.py` returns nothing;
+  `python3 -c "import ast; ast.parse(open('nudge.py').read())"` succeeds; the function signature
+  `compute_pending(proposals_dir, decided_keys)` and its return shape are unchanged.
+
+#### U3. Migrate + extend the nudge tests
+
+- **Goal:** Test coverage reflects the index contract. Existing tests that encode the retired
+  `.md`-parse behavior are migrated to write a `.json` index; the six required scenarios are covered.
+- **Requirements:** the requirements-doc test list (empty index, populated index, missing index →
+  degraded, malformed index → degraded, union-glob `.md`-only → degraded, all-decided keys → None).
+- **Dependencies:** U2.
+- **Files:** `tests/test_nudge.py`.
+- **Approach:**
+  - Add a `write_index(sensei_dir, date_str, proposals)` helper (mirrors `write_digest` /
+    `write_proposal`) that writes `proposals/{date_str}.json` = `{"proposals": proposals}`.
+  - **Migrate the existing `.md`-only tests** — they will otherwise fail, because a `.md` with no
+    `.json` is now *degraded*, not parsed:
+    - `test_pending_line_reports_count_and_oldest` → write a 2-entry index; still expect
+      `2 proposals waiting` + oldest date.
+    - `test_pending_excludes_decided_keys` → write a 1-entry index whose key is in
+      `decisions.jsonl`; still expect `0 proposals`.
+    - `test_degrades_on_unparseable_key` → repurpose/rename to the **union-glob `.md`-only**
+      scenario (a `.md` with no sibling `.json` ⇒ degraded, "proposals waiting since …"); this
+      preserves the existing coverage under the new rule.
+  - Keep `write_proposal` (`.md`) — still needed for the union-glob `.md`-only case.
+  - Add the missing scenarios:
+    - **Empty index** — `write_index(…, [])` + digest present ⇒ heartbeat "0 proposals", `nudge-state` written.
+    - **Populated index** — 2 entries, none decided ⇒ "2 proposals waiting" + oldest.
+    - **Missing index (degraded)** — `.md` present, no `.json` ⇒ degraded loud line (this is the
+      union-glob `.md`-only case; one test can serve both if named clearly).
+    - **Malformed index (degraded)** — write `{date}.json` = `"{not valid json"` (or a JSON list, or
+      `{"proposals": 5}`) ⇒ degraded loud line, no crash.
+    - **All-decided keys → None** — populated index, every key in `decisions.jsonl` ⇒ "0 proposals".
+- **Patterns to follow:** existing `run_nudge` subprocess harness, `write_digest`/`write_proposal`
+  helpers, `tempfile.TemporaryDirectory`, `--now` override; stdlib `unittest` only (no deps).
+- **Test scenarios (this unit's deliverable):** happy path — empty index ⇒ heartbeat; populated
+  index ⇒ count+oldest. Edge — union-glob `.md`-only ⇒ degraded; all-decided ⇒ None; a valid index
+  mixing decided + undecided keys ⇒ counts only undecided. Error — malformed JSON and wrong-shape
+  JSON (`{"proposals": 5}`, top-level list) ⇒ degraded, `returncode == 0` (never crashes session
+  start). Integration — the full `run()` path via subprocess asserts the emitted `systemMessage`
+  string for each.
+- **Verification:** `python3 -m unittest discover tests` is green; no test still writes a `.md`
+  expecting it to be *parsed* for keys.
+
+#### U4. One-time manual cleanup of legacy `.md`-only days (build task, live state)
+
+- **Goal:** After the reader switches to the index, no legacy `.md`-only day remains in the
+  maintainer's `~/.claude/sensei/proposals/` to false-alarm as degraded. **No in-code migration** —
+  this is the deliberate manual step ADR-0016 sanctions.
+- **Requirements:** Migration / compatibility; ADR-0016 Consequence (no compatibility branch).
+- **Dependencies:** U1, U2 (do this only once the new writer/reader are installed).
+- **Files:** none in-repo. Operates on **live user state** — `~/.claude/sensei/proposals/*.md`
+  (currently 14 files: `2026-07-09.md` … `2026-07-22.md`).
+- **Approach:** This is an operational step performed under `/goal`, **not** committed code, and it
+  is the **explicitly-authorized exception** to the CLAUDE.md guardrail "never delete proposals
+  during development unless explicitly asked" (the plan asks). Manual judgment, not a scripted `rm`:
+  1. Before deleting anything, ensure any *still-undecided real* proposals in those 14 files are
+     captured — run `/sensei review` (or record verdicts) so nothing valuable is lost, since these
+     `.md` files are the only record of those proposals (there is no index for them).
+  2. Then remove the legacy `.md` files so no `.md`-only day survives. Do **not** backfill indexes
+     (that would require the `KEY_RE` parsing this feature deletes).
+  3. Confirm: `ls ~/.claude/sensei/proposals/*.md` shows only files that also have a sibling
+     `.json` (i.e. produced by the new writer), or none.
+  - Going forward the LLM stage writes the index every night; no `.md`-only day recurs except a
+    genuine partial-write, which *should* be caught as degraded.
+- **Test scenarios:** `Test expectation: none — one-time operational cleanup of live state, not
+  code. Verified by inspection (step 3).`
+- **Verification:** after cleanup, a real session start emits the heartbeat (or a correct pending
+  line), not a spurious "proposals waiting since 2026-07-09".
+
+### Sequencing
+
+U1 and U2 are the two ends of one contract and can be implemented in parallel (different files, no
+code dependency); land both before U3. U3 depends on U2. U4 is last — it touches live state and is
+only meaningful once the new writer + reader are installed (`./install.sh`). Suggested landing
+order: **U1 + U2 → U3 → (install) → U4.**
+
+### Verification Contract
+
+- **Automated:** `python3 -m unittest discover tests` passes (U3 green; `test_mine.py` /
+  `test_settings_hook.py` unaffected).
+- **Static:** `KEY_RE`, `split("---")`, `len(keys)`, and the `re` import are all absent from
+  `nudge.py`; `compute_pending` signature and return shape unchanged; `run()` untouched.
+- **Manual reader smoke (never against live state):** run `nudge.py` from the repo against a
+  scratch fixture dir — `python3 nudge.py --sensei-dir <scratch> --now 2026-07-22T09:00:00` — seeded
+  with a digest + hand-written index files covering empty / populated / missing / malformed, and
+  confirm the emitted `systemMessage` matches the reader-branch table. Never point `--sensei-dir` at
+  `~/.claude/sensei`.
+- **Writer:** SKILL.md step 5 is inspected (U1 verification) — the writer is LLM prose, exercised
+  end-to-end only by a real `/sensei nightly` after `./install.sh`.
+- **ADR-0002 bright line:** unchanged — no config file is written or edited by any unit.
+
+### Definition of Done
+
+- [x] U1 — SKILL.md step 5 specifies the `.json` index write, `.md`-first ordering, and the
+  no-placeholder quiet-night rule; the `- **Key:**` note is re-pointed to review/index.
+- [x] U2 — `compute_pending` reads the index only; `KEY_RE`, `split("---")`, the placeholder skip,
+  the `len(keys) < len(blocks)` heuristic, and the orphaned `re` import are deleted; union-glob and
+  degraded mapping retained; return shape and `run()` unchanged.
+- [x] U3 — existing `.md`-parse tests migrated to indexes; all six scenarios covered; full test
+  suite green.
+- [x] Verification Contract's automated + static + manual-smoke checks pass.
+- [x] U4 — legacy `.md`-only days cleaned up by hand after install; no spurious degraded nudge.
+- [x] (Already done in the grill — verify only, do not redo: ADR-0016 exists, ADR-0014 back-pointer
+  present, CONTEXT.md "Proposal index" term present.)

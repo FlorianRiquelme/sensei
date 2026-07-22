@@ -34,6 +34,12 @@ def write_proposal(sensei_dir, date_str, content):
     with open(os.path.join(proposals_dir, f"{date_str}.md"), "w") as f:
         f.write(content)
 
+def write_index(sensei_dir, date_str, proposals):
+    proposals_dir = os.path.join(sensei_dir, "proposals")
+    os.makedirs(proposals_dir, exist_ok=True)
+    with open(os.path.join(proposals_dir, f"{date_str}.json"), "w") as f:
+        json.dump({"proposals": proposals}, f)
+
 def write_decisions(sensei_dir, records):
     with open(os.path.join(sensei_dir, "decisions.jsonl"), "w") as f:
         for r in records:
@@ -82,15 +88,10 @@ class TestNudge(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             now = dt.datetime(2026, 7, 19, 9, 0, 0)  # Friday
             write_digest(tmp, "2026-07-19")
-            write_proposal(tmp, "2026-07-14", (  # Tuesday
-                "## Proposal one\n"
-                "- **Key:** ~/.claude/CLAUDE.md::foo-rule\n"
-                "- **Supporting events:** 5\n"
-                "---\n"
-                "## Proposal two\n"
-                "- **Key:** ~/.claude/CLAUDE.md::bar-rule\n"
-                "- **Supporting events:** 3\n"
-            ))
+            write_index(tmp, "2026-07-14", [  # Tuesday
+                {"key": "~/.claude/CLAUDE.md::foo-rule", "kind": "prose"},
+                {"key": "~/.claude/CLAUDE.md::bar-rule", "kind": "prose"},
+            ])
             result = run_nudge(tmp, now)
             payload = json.loads(result.stdout)
             self.assertIn("2 proposals waiting", payload["systemMessage"])
@@ -101,10 +102,9 @@ class TestNudge(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             now = dt.datetime(2026, 7, 19, 9, 0, 0)
             write_digest(tmp, "2026-07-19")
-            write_proposal(tmp, "2026-07-14", (
-                "## Proposal one\n"
-                "- **Key:** ~/.claude/CLAUDE.md::foo-rule\n"
-            ))
+            write_index(tmp, "2026-07-14", [
+                {"key": "~/.claude/CLAUDE.md::foo-rule", "kind": "prose"},
+            ])
             write_decisions(tmp, [
                 {"date": "2026-07-15", "title": "x", "key": "~/.claude/CLAUDE.md::foo-rule", "verdict": "accepted"},
             ])
@@ -112,14 +112,73 @@ class TestNudge(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertIn("0 proposals", payload["systemMessage"])
 
-    def test_degrades_on_unparseable_key(self):
+    def test_md_only_day_degrades(self):
+        # Union-glob: a .md with no sibling .json (partial LLM write, or a legacy day) is
+        # degraded, never parsed for keys.
         with tempfile.TemporaryDirectory() as tmp:
             now = dt.datetime(2026, 7, 19, 9, 0, 0)
             write_digest(tmp, "2026-07-19")
-            write_proposal(tmp, "2026-07-10", "## Legacy proposal\nSome text, no Key line at all.\n")
+            write_proposal(tmp, "2026-07-10", "## Legacy proposal\nSome text, no index for this day.\n")
             result = run_nudge(tmp, now)
             payload = json.loads(result.stdout)
             self.assertIn("proposals waiting since 2026-07-10", payload["systemMessage"])
+            self.assertIn("/sensei review", payload["systemMessage"])
+
+    def test_empty_index_is_healthy_heartbeat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19", sessions_scanned=4, events_total=9)
+            write_index(tmp, "2026-07-19", [])
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertIn("0 proposals", payload["systemMessage"])
+            with open(os.path.join(tmp, "nudge-state")) as f:
+                self.assertEqual(f.read().strip(), "2026-07-19")
+
+    def test_all_decided_keys_reports_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19")
+            write_index(tmp, "2026-07-14", [
+                {"key": "~/.claude/CLAUDE.md::foo-rule", "kind": "prose"},
+                {"key": "~/.claude/CLAUDE.md::bar-rule", "kind": "habit-rule"},
+            ])
+            write_decisions(tmp, [
+                {"date": "2026-07-15", "title": "x", "key": "~/.claude/CLAUDE.md::foo-rule", "verdict": "accepted"},
+                {"date": "2026-07-15", "title": "y", "key": "~/.claude/CLAUDE.md::bar-rule", "verdict": "reject-not-wanted"},
+            ])
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertIn("0 proposals", payload["systemMessage"])
+
+    def test_malformed_index_degrades(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19")
+            proposals_dir = os.path.join(tmp, "proposals")
+            os.makedirs(proposals_dir)
+            with open(os.path.join(proposals_dir, "2026-07-12.json"), "w") as f:
+                f.write("{not valid json")
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("proposals waiting since 2026-07-12", payload["systemMessage"])
+            self.assertIn("/sensei review", payload["systemMessage"])
+
+    def test_wrong_shape_index_degrades(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19")
+            proposals_dir = os.path.join(tmp, "proposals")
+            os.makedirs(proposals_dir)
+            with open(os.path.join(proposals_dir, "2026-07-11.json"), "w") as f:
+                json.dump({"proposals": 5}, f)
+            with open(os.path.join(proposals_dir, "2026-07-12.json"), "w") as f:
+                json.dump([], f)
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("proposals waiting since 2026-07-11", payload["systemMessage"])
             self.assertIn("/sensei review", payload["systemMessage"])
 
     def test_second_invocation_same_day_is_silent(self):
