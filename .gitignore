@@ -4,3 +4,10 @@
 # Local, uncommitted Claude Code instructions (personal workflow)
 CLAUDE.local.md
 __pycache__/
+
+# The global gitignore excludes .claude/, but this repo ships its project
+# skills (e.g. /spike) there. Track .claude/skills/; keep the rest (worktrees,
+# local settings) ignored.
+!.claude/
+.claude/*
+!.claude/skills/

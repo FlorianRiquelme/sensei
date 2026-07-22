@@ -50,11 +50,14 @@ This repo follows a compound-engineering (CE) lifecycle. A feature moves through
 4. `/goal` — implement a work unit.
 5. `/ce-code-review` — review the implementation.
 
+For an **investigation issue** — one whose deliverable is a recommendation, not a feature (e.g. "Investigate: should we adopt approach X") — run `/spike` first: build a throwaway spike for real evidence, recommend adopt/defer/reject on the issue, **discard the spike code**, then enter the lifecycle above to implement fresh from a requirements-only plan. A spike earns a decision, not a merge. See `.claude/skills/spike/`.
+
 ### Milestones & versioning
 
 - **Roadmap anchor:** `STRATEGY.md` (repo root) holds the investment tracks and the scope firewall. Maintain it with `/ce-strategy`; `/ce-ideate`, `/ce-brainstorm`, and `/ce-plan` read it as grounding.
 - **One version = one track's sentence.** Versions are tracked as GitHub Milestones, not branches. A new idea, however good, is triaged into a *later* milestone, never pulled into the current one. That is where scope creep is fought.
 - **Milestones group issues, not branches.** No long-lived milestone/integration branch: each feature branch and each bug fix merges to `main` independently (see Branching), so `main` stays shippable. A version "ships" when its milestone's issues are all merged; tag it then.
+- **Feature-complete is a hardening window.** When a milestone's feature issues are all merged but the version isn't tagged yet, proactively suggest cleanup, refactors, and architecture-hardening (e.g. via `/improve-codebase-architecture`) and — with the maintainer's ok — file them as issues into that *same* milestone before tagging, so a version ships in good shape. This is quality work on what you just built; it is **not** an exception to the scope firewall above, which fights new *ideas*, not the upkeep of shipped code. A future session that notices a milestone is feature-complete should raise this.
 
 ### Stage handoffs
 
