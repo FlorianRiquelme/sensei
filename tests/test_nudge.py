@@ -151,6 +151,39 @@ class TestNudge(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertIn("0 proposals", payload["systemMessage"])
 
+    def test_mixed_decided_and_undecided_counts_only_undecided(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19")
+            write_index(tmp, "2026-07-14", [
+                {"key": "~/.claude/CLAUDE.md::foo-rule", "kind": "prose"},
+                {"key": "~/.claude/CLAUDE.md::bar-rule", "kind": "prose"},
+                {"key": "~/.claude/CLAUDE.md::baz-rule", "kind": "hook"},
+            ])
+            write_decisions(tmp, [
+                {"date": "2026-07-15", "title": "x", "key": "~/.claude/CLAUDE.md::foo-rule", "verdict": "accepted"},
+            ])
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertIn("2 proposals waiting", payload["systemMessage"])
+            self.assertIn("2026-07-14", payload["systemMessage"])
+
+    def test_non_string_key_is_skipped_not_crash(self):
+        # A JSON-legal but non-string (unhashable) key must be skipped like a missing key,
+        # never abort the whole computation — other well-formed pending dates still report.
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 7, 19, 9, 0, 0)
+            write_digest(tmp, "2026-07-19")
+            write_index(tmp, "2026-07-13", [{"key": ["a", "b"], "kind": "prose"}])
+            write_index(tmp, "2026-07-14", [
+                {"key": "~/.claude/CLAUDE.md::real-rule", "kind": "prose"},
+            ])
+            result = run_nudge(tmp, now)
+            payload = json.loads(result.stdout)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("1 proposal waiting", payload["systemMessage"])
+            self.assertIn("2026-07-14", payload["systemMessage"])
+
     def test_malformed_index_degrades(self):
         with tempfile.TemporaryDirectory() as tmp:
             now = dt.datetime(2026, 7, 19, 9, 0, 0)

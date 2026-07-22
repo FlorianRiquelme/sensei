@@ -137,7 +137,8 @@ it produces a ready artifact but never writes it.
    - **Hook proposal** (escalation, from step 2's exception) — a pattern already covered by an
      accepted rule but still qualifying past the grace period escalates instead of being skipped.
      Keep the **same `key`** as the original accepted decision (same rule, hardened — not a new
-     rule), still emitted as its own `- **Key:**` line per the parse contract above; set
+     rule), still emitted as its own `- **Key:**` line (mirrored into the Proposal index by step
+     5, same as the other proposal shapes); set
      **`target`** to the hook's install path (e.g. `~/.claude/settings.json` or a
      project-scoped `.claude/settings.json`). Review, when this proposal is accepted, must record
      `tier: "hook"` on the decision line (step 3) — that's what lets a future run's terminal check

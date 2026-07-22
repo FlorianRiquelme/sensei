@@ -67,7 +67,7 @@ def compute_pending(proposals_dir, decided_keys):
             continue
         for p in idx["proposals"]:
             key = p.get("key") if isinstance(p, dict) else None
-            if key and key not in decided_keys:
+            if isinstance(key, str) and key and key not in decided_keys:
                 pending.append(date_str)
 
     if degraded:
