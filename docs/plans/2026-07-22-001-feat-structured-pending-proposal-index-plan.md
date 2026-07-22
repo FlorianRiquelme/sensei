@@ -61,26 +61,37 @@ proposals). The sidecar is an **LLM-stage** artifact and inherits the same durab
 
 ### Scope — in
 
-1. **New nightly artifact** `~/.claude/sensei/proposals/YYYY-MM-DD.json`, written by the LLM
-   stage, **every run**, including an empty `proposals` array on zero-qualifying nights.
-2. **Collapsed `compute_pending`** that reads only the sidecar. `KEY_RE`, `text.split("---")`,
+1. **New nightly artifact** `~/.claude/sensei/proposals/YYYY-MM-DD.json` (the **Proposal index**),
+   written by the LLM stage, **every run**, including an empty `proposals` array on
+   zero-qualifying nights.
+2. **Collapsed `compute_pending`** that reads only the index. `KEY_RE`, `text.split("---")`,
    the one-line placeholder check, and the `len(keys) < len(blocks)` degraded heuristic are all
    **deleted**.
-3. **SKILL nightly step 5** gains the sidecar-write instruction. The `- **Key:**` line loses its
-   "parse contract" status.
+3. **SKILL nightly step 5** gains the index-write instruction, with two invariants:
+   - **`.md` first, then `.json`.** The `.md` is written before the index, as the final action of
+     the proposal step. Review reads the `.md`; the index only points into it, so the forbidden
+     state (`.json` present, `.md` absent) must be impossible by construction. A crash between the
+     two leaves `.md`-without-`.json` → degraded/loud, and review can still show the proposals.
+   - **Zero-qualifying nights write only the index** (`{"proposals": []}`). The one-line
+     placeholder `.md` is **retired** — the Digest, not a placeholder, is the proof-of-patrol, and
+     under the union-glob a placeholder `.md` whose index write failed would false-alarm as
+     degraded on a night with zero proposals.
+   - The `- **Key:**` line **stays**, re-pointed: it lost its *nudge* consumer (the regex) but
+     keeps its *review* consumer (review records verdicts by key). Its byte-exact rigidity is no
+     longer load-bearing; step 5 mirrors these keys into the index.
 
 ### Scope — out (firewall)
 
 - **No** restructuring proposals into a JSON-first format with a rendered `.md` view. The `.md`
-  stays the canonical human/review artifact (review reads it, SKILL.md:164); the sidecar is
-  strictly an **additive index**.
-- **No** backfill/migration tool. Legacy `.md`-only days self-heal (see Migration).
+  stays the canonical human/review artifact (review reads it, SKILL.md:164); the index is
+  strictly an **additive** index.
+- **No** in-code migration or backfill. The format is pre-release with a single user, so legacy
+  `.md`-only days are cleaned up **by hand, once** (see Migration), not by a compatibility branch.
 
 ### Index schema (spike)
 
 ```json
 {
-  "date": "2026-07-22",
   "proposals": [
     {"key": "~/.claude/CLAUDE.md::ddev-prefix-artisan", "kind": "prose"},
     {"key": "~/.claude/settings.json::block-bare-artisan", "kind": "hook"}
@@ -89,10 +100,14 @@ proposals). The sidecar is an **LLM-stage** artifact and inherits the same durab
 ```
 
 - `kind` ∈ `prose` | `habit-rule` | `hook` (mirrors SKILL.md's proposal-kind labels).
-- The current Nudge only **counts**, so it consumes `key` alone. `kind` and `date` are carried
-  because the AC asks for them and they are the natural structured record of what the `.md`
-  already labels — **not** because the Nudge needs them today (flagged YAGNI tension; low
-  carrying cost, AC-mandated).
+- **`date` dropped** (was in the earlier draft): it is 100% redundant with the filename —
+  `compute_pending` derives the date from the basename, never from a field — and duplicating it is
+  a pure drift hazard. Top-level shape is just `{"proposals": [...]}`.
+- **`kind` kept** despite the Nudge only **counting** (it consumes `key` alone today). Unlike
+  `date`, `kind` is a first-class attribute, not a derived duplicate; the index is rewritten every
+  night and ages out in ~30 days, so it carries *zero* migration burden and can start being read
+  (e.g. "1 **hook** proposal waiting — you install those yourself") with no backfill. Cheap,
+  self-describing, defuses the usual YAGNI objection.
 
 ### Collapsed `compute_pending` (spike)
 
@@ -121,16 +136,21 @@ def compute_pending(proposals_dir, decided_keys):
     return None
 ```
 
-The **union-glob of `.md` + `.json`** is load-bearing: it keeps legacy `.md`-only days
-visible-and-loud (they hit the missing-sidecar branch) while a healthy new day with an empty
+The **union-glob of `.md` + `.json`** is load-bearing, and its justification survived the grill
+once legacy migration was stripped away: with legacy days cleaned up by hand, the *only* remaining
+`.md`-without-healthy-`.json` case going forward is a **partial LLM failure** — the night the LLM
+writes the `.md` with real proposals but dies before the index. The union-glob catches exactly that
+(→ degraded/loud), honoring "never under-remind," at zero cost. A healthy new day with an empty
 array contributes nothing. The return shape is unchanged, so `run()`'s consumer (nudge.py:160–166)
 needs no edits.
 
 ### "Degraded" mapping (AC criterion 3)
 
-In the structured world, **degraded** = the sidecar is **missing** (legacy `.md`-only day, or the
-LLM broke before writing it) **or malformed** (not valid JSON / not `{"proposals": [...]}`). The
-old `len(keys) < len(blocks)` partial-write case folds into "malformed or missing."
+In the structured world, **degraded** = the index is **missing** for a day whose `.md` exists (a
+partial LLM failure — `.md` written, index not, caught by the union-glob + `.md`-first ordering)
+**or malformed** (not valid JSON / not `{"proposals": [...]}`). The old `len(keys) < len(blocks)`
+partial-write case folds into "malformed or missing." (Pre-existing legacy `.md`-only days are not
+a concern — they are cleaned up by hand once, pre-release; see Migration.)
 
 - **Not detectable:** a *valid* sidecar that silently under-lists proposals. Accepted — review
   reads the full `.md` (SKILL.md:164), so nothing is lost except the nudge line's count. Same risk
@@ -147,16 +167,26 @@ old `len(keys) < len(blocks)` partial-write case folds into "malformed or missin
   **+** proposals-degraded → the loud "run /sensei review" line — correct: the miner ran, the LLM
   stage may have broken, the user is pointed at review.
 - **ADR-0014** (Digest is a *deterministic miner* artifact): **not extended literally** — see the
-  correction above. **A small new ADR is likely warranted** to record the decision that *an
-  LLM-stage structured sidecar is acceptable for parsing pending state, while the run-happened
-  signal stays the miner's Digest.* Writing it is `/grill-with-docs`'s call.
+  correction above. **ADR-0016 written** (`/grill-with-docs`) to record the decision that *an
+  LLM-stage structured Proposal index is acceptable for parsing pending state, while the
+  run-happened signal stays the miner's Digest.* A back-pointer was added to ADR-0014 delimiting
+  the two artifacts, and CONTEXT.md gained a **Proposal index** glossary term.
 
 ### Migration / compatibility
 
-Legacy `proposals/*.md` files with no sidecar fall into the **missing-index → degraded** branch:
-the Nudge shows the loud count-unknown reminder for them until they drop out of the pending set
-via `decisions.jsonl`. Safe (never under-reminds), no migration tool, self-clearing. Matters for
-distribution too (ADR-0006): installed users carry old `.md` days.
+**No in-code migration.** The format is pre-release with a single user (the maintainer), so there
+is nothing to migrate for future distribution users — they install into an empty `proposals/` dir
+and never carry legacy `.md` files. The maintainer's ~14 existing legacy `.md` days (several with
+real proposals, ~8 "nothing today" placeholders) are cleaned up **by hand, once**, as a build-time
+step under `/goal` — *not* by a `compute_pending` compatibility branch.
+
+Why no in-code path: a legacy `.md`-only day is structurally indistinguishable from a partial LLM
+failure (both are `.md`-without-`.json`), and telling them apart would require reading the `.md`'s
+keys — exactly the `KEY_RE` prose-parsing this feature deletes. So there is no clean in-code rule;
+the earlier draft's claim that legacy days "self-heal via `decisions.jsonl`" was **wrong** (the
+degraded branch never consults `decided_keys`, so those days would have false-alarmed loudly and
+*permanently*, unclearable by review). Manual cleanup sidesteps the whole problem. The **ADR-0006
+distribution concern is dropped** — it does not apply pre-release.
 
 ## Acceptance criteria (from #22)
 
@@ -165,14 +195,27 @@ distribution too (ADR-0006): installed users carry old `.md` days.
 - [x] Confirm the Nudge can drop `KEY_RE`, the `---` split, and the placeholder/degraded logic —
   yes; degraded's structured mapping enumerated above.
 - [x] Verify no conflict with ADR-0002 / 0014 / 0015; note whether a new ADR is warranted — done;
-  0002 & 0015 untouched, 0014 not literally extended, **new ADR recommended**.
-- [x] Migration/compat note for old `.md`-only days — above.
+  0002 & 0015 untouched, 0014 not literally extended, **ADR-0016 written**.
+- [x] Migration/compat note for old `.md`-only days — above (no in-code path; manual cleanup).
 
-## Outstanding questions (for `/grill-with-docs`)
+## Outstanding questions — resolved by `/grill-with-docs`
 
-1. **Keep or drop the human-readable `- **Key:**` line in the `.md`** now that it is no longer a
-   parse contract? Leaning **keep** (zero cost, aids human skimming), but a genuine fork.
-2. **Write the new ADR?** Recommended yes (records the LLM-stage-sidecar decision and that the
-   presence-signal stays the miner's). Grill's call.
-3. **Zero-proposal day: also drop the one-line placeholder `.md`?** With the sidecar as the run
-   marker, the placeholder is redundant with the Digest. Minor; can be decided at plan/build time.
+1. **Keep the `- **Key:**` line?** → **KEEP**, re-pointed. It lost its *nudge* consumer (the
+   regex) but keeps its *review* consumer — review records verdicts in `decisions.jsonl` by key and
+   skips already-decided proposals by key, reading the key from the `.md`. Dropping it would force
+   review to correlate index entries back to `.md` blocks (the fuzzy matching we're deleting).
+   Byte-exact rigidity relaxed; step 5 mirrors keys into the index. (Scope-in #3.)
+2. **Write the new ADR?** → **YES, ADR-0016 written.** Clears all three `domain-modeling` bars
+   (hard to reverse, surprising vs ADR-0014, real trade-off). Records the LLM-stage-index decision
+   and that the run-happened signal stays the miner's Digest.
+3. **Drop the placeholder `.md`?** → **DROP.** Quiet nights write only `{"proposals": []}`. The
+   placeholder was vestigial (nothing read it; the Digest is the proof-of-patrol) and, under the
+   union-glob, an active false-alarm risk if its index write failed. (Scope-in #3.)
+
+### Also resolved in the grill (beyond the three)
+
+- **Migration killed as a code concern** — pre-release/single-user → manual cleanup; the earlier
+  "self-heal via `decisions.jsonl`" claim was factually wrong. (See Migration.)
+- **Union-glob kept** — re-justified as partial-write insurance, not legacy handling.
+- **`.md`-first-then-`.json` ordering** locked as an invariant. (Scope-in #3.)
+- **Schema: `date` dropped, `kind` kept.** (Index schema.)
