@@ -50,6 +50,8 @@ This repo follows a compound-engineering (CE) lifecycle. A feature moves through
 4. `/goal` — implement a work unit.
 5. `/ce-code-review` — review the implementation.
 
+For an **investigation issue** — one whose deliverable is a recommendation, not a feature (e.g. "Investigate: should we adopt approach X") — run `/spike` first: build a throwaway spike for real evidence, recommend adopt/defer/reject on the issue, **discard the spike code**, then enter the lifecycle above to implement fresh from a requirements-only plan. A spike earns a decision, not a merge. See `.claude/skills/spike/`.
+
 ### Milestones & versioning
 
 - **Roadmap anchor:** `STRATEGY.md` (repo root) holds the investment tracks and the scope firewall. Maintain it with `/ce-strategy`; `/ce-ideate`, `/ce-brainstorm`, and `/ce-plan` read it as grounding.
